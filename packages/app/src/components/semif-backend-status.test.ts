@@ -5,6 +5,8 @@ import {
   semifBackendDotClass,
   semifBackendFallbackI18nKey,
   semifBackendMessageKey,
+  semifHipFetchInProgress,
+  semifLifecycleStatusKey,
 } from "./semif-backend-status"
 
 const base = (): SemifStatus => ({
@@ -21,6 +23,54 @@ const base = (): SemifStatus => ({
   choices: [],
 })
 
+describe("semifHipFetchInProgress", () => {
+  test("detects HIP fetch while downloading without a vendored binary", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+        backendRequested: "auto",
+      }),
+    ).toBe(true)
+  })
+
+  test("detects HIP fetch while verifying with hip backend requested", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "verifying",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+        backendRequested: "hip",
+      }),
+    ).toBe(true)
+  })
+
+  test("ignores model download when HIP binary is already available", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backend: "hip",
+        backendFallback: false,
+      }),
+    ).toBe(false)
+  })
+
+  test("ignores idle no_vendored_binary fallback", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "offline",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe(false)
+  })
+})
+
 describe("semifBackendDisplayState", () => {
   test("reports HIP active when backend is hip without fallback", () => {
     expect(
@@ -30,6 +80,17 @@ describe("semifBackendDisplayState", () => {
         backendFallback: false,
       }),
     ).toBe("hip_active")
+  })
+
+  test("reports HIP fetch in progress before other fallback states", () => {
+    expect(
+      semifBackendDisplayState({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("hip_fetch_in_progress")
   })
 
   test("reports system runtime missing before other states", () => {
@@ -82,6 +143,28 @@ describe("semifBackendMessageKey", () => {
     ).toBe("semif.backend.hip_active")
   })
 
+  test("selects HIP fetch copy while downloading without a vendored binary", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.hip_downloading")
+  })
+
+  test("selects HIP fetch copy while verifying without a vendored binary", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        status: "verifying",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.hip_verifying")
+  })
+
   test("selects the system runtime message", () => {
     expect(
       semifBackendMessageKey({
@@ -93,10 +176,11 @@ describe("semifBackendMessageKey", () => {
     ).toBe("semif.backend.system_runtime_missing")
   })
 
-  test("selects fallback reason copy for vendored binary absence", () => {
+  test("selects fallback reason copy for vendored binary absence when idle", () => {
     expect(
       semifBackendMessageKey({
         ...base(),
+        status: "offline",
         backendFallback: true,
         backendFallbackReason: "no_vendored_binary",
       }),
@@ -114,12 +198,48 @@ describe("semifBackendMessageKey", () => {
   })
 })
 
+describe("semifLifecycleStatusKey", () => {
+  test("refines downloading lifecycle copy during HIP fetch", () => {
+    expect(
+      semifLifecycleStatusKey({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.state.downloading_hip_runtime")
+  })
+
+  test("refines verifying lifecycle copy during HIP fetch", () => {
+    expect(
+      semifLifecycleStatusKey({
+        ...base(),
+        status: "verifying",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.state.verifying_hip_runtime")
+  })
+
+  test("keeps model download lifecycle copy when HIP binary is present", () => {
+    expect(
+      semifLifecycleStatusKey({
+        ...base(),
+        status: "downloading",
+        backend: "hip",
+        backendFallback: false,
+      }),
+    ).toBe("semif.state.downloading")
+  })
+})
+
 describe("semifBackendDotClass", () => {
   test("uses success styling for active HIP", () => {
     expect(semifBackendDotClass("hip_active")).toBe("bg-icon-success-base")
   })
 
-  test("uses warning styling for fallback and missing runtime", () => {
+  test("uses warning styling for HIP fetch, fallback, and missing runtime", () => {
+    expect(semifBackendDotClass("hip_fetch_in_progress")).toBe("bg-icon-warning-base")
     expect(semifBackendDotClass("cpu_fallback")).toBe("bg-icon-warning-base")
     expect(semifBackendDotClass("system_runtime_missing")).toBe("bg-icon-warning-base")
   })
