@@ -5,4 +5,5 @@ web-dist/
 
 # Vendored llama-server runtime (staged by packages/opencode/script/fetch-semif-server.ts)
 semif/
+semif-hip/
 .semif-cache/

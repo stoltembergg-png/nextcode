@@ -101,13 +101,21 @@ jobs:
         run: |
           set -euo pipefail
           MIRROR_TAG="semif-server-${PIN}"
-          for TARGET in x86_64-pc-windows-msvc aarch64-apple-darwin x86_64-apple-darwin; do
-            case "$TARGET" in
-              *apple-darwin) EXT=.tar.gz ;;
+          LOCK="packages/opencode/script/semif-server.lock.json"
+          TARGETS=$(bun -e "console.log(Object.keys(require('./${LOCK}').targets).join(' '))")
+          for TARGET in $TARGETS; do
+            ASSET=$(bun -e "console.log(require('./${LOCK}').targets['${TARGET}'].asset)")
+            case "$ASSET" in
+              *.tar.gz) EXT=.tar.gz ;;
               *) EXT=.zip ;;
             esac
+            VARIANT=cpu
+            BASE="$TARGET"
+            case "$TARGET" in
+              *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
+            esac
             export NEXTCODE_SEMIF_MIRROR="https://github.com/${{ github.repository }}/releases/download/${MIRROR_TAG}/semif-server-${PIN}-${TARGET}${EXT}"
-            bun packages/opencode/script/fetch-semif-server.ts --target "$TARGET" --download-only
+            bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only
           done
 
       - name: Publish the mirrored archives
@@ -124,7 +132,8 @@ jobs:
             gh release create "$MIRROR_TAG" --repo "${{ github.repository }}" --title "$MIRROR_TAG" --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
           fi
           LOCK="packages/opencode/script/semif-server.lock.json"
-          for TARGET in x86_64-pc-windows-msvc aarch64-apple-darwin x86_64-apple-darwin; do
+          TARGETS=$(bun -e "console.log(Object.keys(require('./${LOCK}').targets).join(' '))")
+          for TARGET in $TARGETS; do
             ASSET=$(bun -e "console.log(require('./${LOCK}').targets['${TARGET}'].asset)")
             case "$ASSET" in
               *.tar.gz) EXT=.tar.gz ;;

@@ -17,10 +17,13 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { HOST_TARGETS, stagedServerName } from "../../script/fetch-semif-server"
+import type { BackendVariant } from "./backend"
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
 export const SERVER_ENV_FALLBACK = "SEMIF_SERVER_PATH"
 export const LIBS_ENV = "NEXTCODE_SEMIF_LIBS_PATH"
+export const LIBS_HIP_ENV = "NEXTCODE_SEMIF_HIP_LIBS_PATH"
 
 export function modelsRoot(): string {
   return path.join(Global.Path.data, "semif", "models")
@@ -71,6 +74,7 @@ export interface ServerPathInput {
   readonly configPath?: string
   readonly env?: Record<string, string | undefined>
   readonly devFallback?: string
+  readonly variant?: BackendVariant
 }
 
 // Precedence: explicit config path > environment > a dev-only sibling of the
@@ -78,23 +82,56 @@ export interface ServerPathInput {
 // an error; callers surface a dedicated error when the server is actually needed.
 export function resolveServerPath(input: ServerPathInput = {}): string | undefined {
   const env = input.env ?? process.env
+  const variant = input.variant ?? "cpu"
   const configured = readString(input.configPath) ?? readString(env[SERVER_ENV]) ?? readString(env[SERVER_ENV_FALLBACK])
-  if (configured) return configured
-  const dev = input.devFallback ?? defaultDevServerPath()
+  if (configured) return serverPathForVariant(configured, variant)
+  const dev = input.devFallback ?? defaultDevServerPath(variant)
   if (dev && existsSync(dev)) return dev
   return undefined
 }
 
-function defaultDevServerPath(): string {
+function variantSuffix(variant: Exclude<BackendVariant, "cpu">): string {
+  if (variant === "hip") return "-hip"
+  if (variant === "cuda") return "-cuda"
+  return "-vulkan"
+}
+
+function serverPathForVariant(serverPath: string, variant: BackendVariant): string | undefined {
+  if (variant === "cpu") return serverPath
+  const ext = path.extname(serverPath)
+  const base = ext ? serverPath.slice(0, -ext.length) : serverPath
+  const suffix = variantSuffix(variant)
+  if (base.endsWith(suffix)) return serverPath
+  const derived = `${base}${suffix}${ext}`
+  if (existsSync(derived)) return derived
+  const triple = hostTargetOrUndefined()
+  if (!triple) return undefined
+  const named = path.join(path.dirname(serverPath), stagedServerName(triple, variant, ext === ".exe"))
+  if (existsSync(named)) return named
+  return undefined
+}
+
+function defaultDevServerPath(variant: BackendVariant): string | undefined {
   // An unbundled build often stages the runtime next to the current executable.
   // Production shells pass `NEXTCODE_SEMIF_SERVER_PATH` instead, which wins above.
-  return path.join(path.dirname(process.execPath), serverBinaryName())
+  const triple = hostTargetOrUndefined()
+  if (!triple) return undefined
+  const isZip = process.platform === "win32"
+  return path.join(path.dirname(process.execPath), stagedServerName(triple, variant, isZip))
+}
+
+function hostTargetOrUndefined(): string | undefined {
+  return HOST_TARGETS[`${process.platform}-${process.arch}`]
 }
 
 // Directory holding the launcher's shared libraries, supplied by the desktop
 // shell as the `semif` resource. When absent the sidecar spawns the resolved
 // binary in place (the unbundled/dev path).
-export function resolveLibsPath(env: Record<string, string | undefined> = process.env): string | undefined {
+export function resolveLibsPath(
+  env: Record<string, string | undefined> = process.env,
+  variant: BackendVariant = "cpu",
+): string | undefined {
+  if (variant === "hip") return readString(env[LIBS_HIP_ENV])
   return readString(env[LIBS_ENV])
 }
 

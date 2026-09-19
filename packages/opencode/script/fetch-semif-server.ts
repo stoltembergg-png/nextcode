@@ -7,17 +7,19 @@
 //   mirror:   NEXTCODE_SEMIF_MIRROR (a URL to our own mirrored asset), tried first
 //
 // The archives carry `llama-server` plus its shared libraries (DLLs on Windows,
-// dylibs on macOS). All libraries are staged together so the loader can resolve
-// them. Staging layout:
+// dylibs on macOS, shared objects on Linux). All libraries are staged together
+// so the loader can resolve them. Staging layout:
 //
-//   packages/desktop/src-tauri/binaries/llama-server-<triple>[.exe]  (Tauri externalBin)
-//   packages/desktop/src-tauri/semif/<libs>                          (Tauri resources, "semif")
+//   packages/desktop/src-tauri/binaries/llama-server-<triple>[.exe]  (Tauri externalBin, cpu)
+//   packages/desktop/src-tauri/binaries/llama-server-<triple>-hip[.exe]  (hip variant)
+//   packages/desktop/src-tauri/semif/<libs>                          (Tauri resources, cpu)
+//   packages/desktop/src-tauri/semif-hip/<libs>                      (Tauri resources, hip)
 //
 // The lockfile is authoritative: bytes and sha256 are verified on every run, and
 // the download falls back from the mirror to the upstream release.
 //
 // Usage:
-//   bun script/fetch-semif-server.ts [--target <triple>] [--force] [--download-only]
+//   bun script/fetch-semif-server.ts [--target <triple>] [--variant cpu|hip|cuda|vulkan] [--force] [--download-only]
 
 import { $ } from "bun"
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
@@ -25,6 +27,8 @@ import path from "node:path"
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
 
 const UPSTREAM_BASE = "https://github.com/ggml-org/llama.cpp/releases/download"
+
+export type SemifVariant = "cpu" | "hip" | "cuda" | "vulkan"
 
 interface TargetLock {
   asset: string
@@ -40,6 +44,7 @@ interface Lockfile {
 interface Marker {
   tag: string
   target: string
+  variant: SemifVariant
   asset: string
   sha256: string
   staged: { path: string; bytes: number }[]
@@ -53,25 +58,58 @@ interface ExtractedFile {
 const repo = path.resolve(import.meta.dir, "../../..")
 const tauri = path.join(repo, "packages/desktop/src-tauri")
 const binariesDir = path.join(tauri, "binaries")
-const libsDir = path.join(tauri, "semif")
 const cacheDir = path.join(tauri, ".semif-cache")
 const lockPath = path.join(import.meta.dir, "semif-server.lock.json")
 
-const HOST_TARGETS: Record<string, string> = {
+export const HOST_TARGETS: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
   "darwin-arm64": "aarch64-apple-darwin",
   "darwin-x64": "x86_64-apple-darwin",
+  "linux-x64": "x86_64-unknown-linux-gnu",
+}
+
+const VARIANT_SUFFIX: Record<Exclude<SemifVariant, "cpu">, string> = {
+  hip: "-hip",
+  cuda: "-cuda",
+  vulkan: "-vulkan",
 }
 
 interface StageOptions {
   target?: string
+  variant?: SemifVariant
   force?: boolean
   downloadOnly?: boolean
 }
 
+export function hostTarget(platform = process.platform, arch = process.arch): string {
+  const target = HOST_TARGETS[`${platform}-${arch}`]
+  if (!target) {
+    throw new Error(
+      `no llama-server target for ${platform}-${arch}; supported: ${Object.values(HOST_TARGETS).join(", ")}`,
+    )
+  }
+  return target
+}
+
+export function lockTargetKey(baseTarget: string, variant: SemifVariant = "cpu"): string {
+  if (variant === "cpu") return baseTarget
+  return `${baseTarget}${VARIANT_SUFFIX[variant]}`
+}
+
+export function stagedServerName(baseTarget: string, variant: SemifVariant, isZip: boolean): string {
+  const suffix = variant === "cpu" ? "" : VARIANT_SUFFIX[variant]
+  return `llama-server-${baseTarget}${suffix}${isZip ? ".exe" : ""}`
+}
+
+export function stagedLibsDir(variant: SemifVariant): string {
+  return path.join(tauri, variant === "cpu" ? "semif" : `semif-${variant}`)
+}
+
 export async function stageSemifServer(options: StageOptions = {}) {
   const lock = (await Bun.file(lockPath).json()) as Lockfile
-  const target = options.target ?? hostTarget()
+  const variant = options.variant ?? "cpu"
+  const baseTarget = options.target ?? hostTarget()
+  const target = lockTargetKey(baseTarget, variant)
   const entry = lock.targets[target]
   if (!entry) {
     throw new Error(`target ${target} is not pinned in ${path.relative(repo, lockPath)}`)
@@ -79,14 +117,15 @@ export async function stageSemifServer(options: StageOptions = {}) {
 
   const isZip = entry.asset.endsWith(".zip")
   const executable = isZip ? "llama-server.exe" : "llama-server"
-  const stagedServer = path.join(binariesDir, `llama-server-${target}${isZip ? ".exe" : ""}`)
+  const libsDir = stagedLibsDir(variant)
+  const stagedServer = path.join(binariesDir, stagedServerName(baseTarget, variant, isZip))
   const markerPath = path.join(cacheDir, `${target}.json`)
 
   // `--download-only` must always materialize the archive, even when the target is
   // already staged: the caller may only want the durable copy for mirroring.
   if (!options.downloadOnly && !options.force && (await isUpToDate(markerPath, lock.tag, entry))) {
     console.log(`llama-server for ${target} is already staged: ${stagedServer}`)
-    return { target, stagedServer, libsDir, archive: path.join(cacheDir, entry.asset), skipped: true }
+    return { target, baseTarget, variant, stagedServer, libsDir, archive: path.join(cacheDir, entry.asset), skipped: true }
   }
 
   mkdirSync(cacheDir, { recursive: true })
@@ -96,10 +135,10 @@ export async function stageSemifServer(options: StageOptions = {}) {
   console.log(`archive verified: ${archive} (${entry.bytes} bytes)`)
 
   if (options.downloadOnly) {
-    return { target, stagedServer, libsDir, archive, skipped: false }
+    return { target, baseTarget, variant, stagedServer, libsDir, archive, skipped: false }
   }
 
-  const files = await extract(archive, entry.asset)
+  const files = await extract(archive, entry.asset, baseTarget)
   const binary = files.find((file) => file.name === executable)
   if (!binary) throw new Error(`archive ${entry.asset} does not contain ${executable}`)
 
@@ -122,22 +161,12 @@ export async function stageSemifServer(options: StageOptions = {}) {
     if (result.exitCode !== 0) throw new Error(`could not mark ${stagedServer} executable`)
   }
 
-  const marker: Marker = { tag: lock.tag, target, asset: entry.asset, sha256: entry.sha256, staged }
+  const marker: Marker = { tag: lock.tag, target, variant, asset: entry.asset, sha256: entry.sha256, staged }
   await Bun.write(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
 
   console.log(`staged server: ${stagedServer} (${serverBytes.byteLength} bytes)`)
   console.log(`staged ${libraries.length} librar${libraries.length === 1 ? "y" : "ies"} in ${libsDir}`)
-  return { target, stagedServer, libsDir, archive, skipped: false }
-}
-
-function hostTarget(): string {
-  const target = HOST_TARGETS[`${process.platform}-${process.arch}`]
-  if (!target) {
-    throw new Error(
-      `no llama-server target for ${process.platform}-${process.arch}; supported: ${Object.values(HOST_TARGETS).join(", ")}`,
-    )
-  }
-  return target
+  return { target, baseTarget, variant, stagedServer, libsDir, archive, skipped: false }
 }
 
 async function isUpToDate(markerPath: string, tag: string, entry: TargetLock): Promise<boolean> {
@@ -190,9 +219,9 @@ async function inspect(file: string): Promise<{ bytes: number; sha256: string }>
   return { bytes: bytes.byteLength, sha256: hasher.digest("hex") }
 }
 
-async function extract(archive: string, asset: string): Promise<ExtractedFile[]> {
+async function extract(archive: string, asset: string, baseTarget: string): Promise<ExtractedFile[]> {
   if (asset.endsWith(".zip")) return extractZip(archive)
-  return extractTarGz(archive)
+  return extractTarGz(archive, baseTarget)
 }
 
 async function extractZip(archive: string): Promise<ExtractedFile[]> {
@@ -211,7 +240,7 @@ async function extractZip(archive: string): Promise<ExtractedFile[]> {
   return files
 }
 
-async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
+async function extractTarGz(archive: string, baseTarget: string): Promise<ExtractedFile[]> {
   const work = path.join(cacheDir, "extract")
   rmSync(work, { recursive: true, force: true })
   mkdirSync(work, { recursive: true })
@@ -223,7 +252,7 @@ async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
   const root = roots.length === 1 ? path.join(work, roots[0]) : work
   const files: ExtractedFile[] = []
   for (const name of readdirSync(root)) {
-    if (!neededDylib(name)) continue
+    if (!neededLibrary(name, baseTarget)) continue
     const source = path.join(root, name)
     if (!statSync(source).isFile()) continue
     files.push({ name, read: async () => new Uint8Array(await Bun.file(source).arrayBuffer()) })
@@ -238,8 +267,12 @@ async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
 /// (plus the unversioned server impl) is enough and avoids duplicating each
 /// library behind three names. Our staging dereferences the symlinks into real
 /// files, because the bundle copy does not preserve links.
-function neededDylib(name: string): boolean {
-  return name === "llama-server" || name === "libllama-server-impl.dylib" || name.endsWith(".0.dylib")
+function neededLibrary(name: string, baseTarget: string): boolean {
+  if (name === "llama-server") return true
+  if (baseTarget.includes("darwin")) {
+    return name === "libllama-server-impl.dylib" || name.endsWith(".0.dylib")
+  }
+  return name.endsWith(".so") || /\.so\.\d+$/.test(name)
 }
 
 function parseArgs(argv: string[]): StageOptions {
@@ -249,7 +282,13 @@ function parseArgs(argv: string[]): StageOptions {
     if (arg === "--force") options.force = true
     else if (arg === "--download-only") options.downloadOnly = true
     else if (arg === "--target") options.target = argv[++index]
-    else throw new Error(`unknown argument: ${arg}`)
+    else if (arg === "--variant") {
+      const variant = argv[++index] as SemifVariant
+      if (variant !== "cpu" && variant !== "hip" && variant !== "cuda" && variant !== "vulkan") {
+        throw new Error(`unknown variant: ${variant}`)
+      }
+      options.variant = variant
+    } else throw new Error(`unknown argument: ${arg}`)
   }
   return options
 }
