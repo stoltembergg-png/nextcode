@@ -18,6 +18,7 @@ import { Config } from "@/config/config"
 import { SemifAcquire } from "./acquire"
 import { SemifBackend, type BackendVariant } from "./backend"
 import { SemifHipRuntime } from "./hip-runtime"
+import { SemifRocmRuntime } from "./rocm-runtime"
 import { parseSemifOptions, type SemifMode } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
@@ -102,6 +103,7 @@ const errorMessage = (cause: unknown): string => {
   if (cause instanceof SemifServiceError) return cause.reason
   if (cause instanceof SemifAcquire.AcquireError) return cause.reason
   if (cause instanceof SemifHipRuntime.HipRuntimeError) return cause.reason
+  if (cause instanceof SemifRocmRuntime.RocmRuntimeError) return cause.reason
   if (cause instanceof SemifRuntime.RuntimeError) return cause.reason
   if (cause instanceof SemifSidecar.SidecarError) return cause.reason
   return cause instanceof Error ? cause.message : String(cause)
@@ -113,6 +115,7 @@ interface State {
   readonly handle?: SemifSidecar.Handle
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
+  readonly rocmFetching?: boolean
 }
 
 const layer = Layer.effect(
@@ -166,6 +169,7 @@ const layer = Layer.effect(
         serverPath: resolved.serverPath,
         hipDownloadFailed: current.hipDownloadFailed,
         hipFetching: current.hipFetching,
+        rocmFetching: current.rocmFetching,
       })
       if (backend.message) {
         yield* backend.fallback
@@ -265,6 +269,52 @@ const layer = Layer.effect(
       return { ...base, status: "offline" as SemifStatus }
     })
 
+    const ensureRocmRuntime = Effect.gen(function* () {
+      const loaded = yield* load
+      if (
+        !SemifRocmRuntime.shouldFetch({
+          requested: loaded.resolved.backend,
+          serverPath: loaded.resolved.serverPath,
+        })
+      ) {
+        return undefined
+      }
+      yield* Ref.update(state, (value) => ({
+        ...value,
+        status: "downloading" as SemifStatus,
+        error: undefined,
+        hipDownloadFailed: false,
+        rocmFetching: true,
+      }))
+      const exit = yield* provideAcquire(
+        SemifRocmRuntime.ensure({
+          policy: loaded.download,
+          requested: loaded.resolved.backend,
+          serverPath: loaded.resolved.serverPath,
+          onProgress: (progress) => {
+            live.progress = progress
+          },
+          onPhase: (phase) =>
+            Effect.runSync(Ref.update(state, (value) => ({ ...value, status: phase as SemifStatus }))),
+        }),
+      ).pipe(Effect.exit)
+      live.progress = undefined
+      yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus, rocmFetching: false }))
+      if (Exit.isFailure(exit)) {
+        if (loaded.download === "auto") {
+          yield* Ref.update(state, (value) => ({ ...value, hipDownloadFailed: true }))
+        }
+        yield* Effect.logWarning("semif: ROCm runtime download failed", { cause: exit.cause })
+        return undefined
+      }
+      yield* Effect.logInfo("semif: ROCm runtime staged", {
+        acquired: exit.value.acquired,
+        gfx: exit.value.gfx,
+        dir: exit.value.dir,
+      })
+      return exit.value
+    })
+
     const ensureHipRuntime = Effect.gen(function* () {
       const loaded = yield* load
       if (
@@ -344,6 +394,7 @@ const layer = Layer.effect(
         return yield* new SemifServiceError({ reason: "semif: disabled (mode=off)" })
       }
       yield* ensureHipRuntime
+      const rocm = yield* ensureRocmRuntime
       const refreshed = yield* load
       if (!refreshed.serverPath) {
         return yield* new SemifServiceError({ reason: "semif: llama-server binary is not available" })
@@ -359,6 +410,7 @@ const layer = Layer.effect(
       const runtime = yield* SemifRuntime.materialize({
         serverPath: refreshed.serverPath,
         libsPath: refreshed.libsPath,
+        rocmPath: rocm?.dir,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.mapError((cause) => new SemifServiceError({ reason: errorMessage(cause) })),
@@ -372,6 +424,10 @@ const layer = Layer.effect(
           loadTimeoutMs: refreshed.resolved.loadTimeoutMs,
           serverPath: runtime.serverPath,
           modelPath: refreshed.modelPath,
+          env:
+            rocm?.rocblasLibraryDir
+              ? { ROCBLAS_TENSILE_LIBPATH: rocm.rocblasLibraryDir }
+              : undefined,
         }),
       ).pipe(Effect.mapError((cause) => new SemifServiceError({ reason: errorMessage(cause) })))
       yield* Effect.tryPromise({
@@ -414,6 +470,7 @@ const layer = Layer.effect(
       acquire: () =>
         Effect.gen(function* () {
           yield* ensureHipRuntime
+          yield* ensureRocmRuntime
           yield* ensureModel
           return yield* snapshot
         }).pipe(

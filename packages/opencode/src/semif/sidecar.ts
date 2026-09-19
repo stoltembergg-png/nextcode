@@ -31,6 +31,7 @@ export interface SidecarConfig {
   readonly loadTimeoutMs: number
   readonly serverPath: string
   readonly modelPath: string
+  readonly env?: Record<string, string>
 }
 
 export interface Handle {
@@ -135,6 +136,7 @@ const command = (config: SidecarConfig, port: number) =>
     ],
     {
       cwd: path.dirname(config.serverPath),
+      env: config.env,
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",

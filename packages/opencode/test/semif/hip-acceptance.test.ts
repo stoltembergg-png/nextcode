@@ -157,7 +157,7 @@ describe("Debbie smoke matrix (HIP on-demand runtime)", () => {
     expect(failed.fallbackReason).not.toBe("manual_cpu")
   })
 
-  test("3) staged HIP binary without system ROCm reports missing_rocm_runtime", async () => {
+  test("3) staged HIP binary without ROCm reports missing_rocm_runtime on Linux and pending staging on Windows", async () => {
     if (!hipPlatformSupported()) return
     const hip = await readHipLock()
     if (!hip) return
@@ -172,13 +172,18 @@ describe("Debbie smoke matrix (HIP on-demand runtime)", () => {
       const status = resolveBackend({
         requested: "hip",
         serverPath: cpu,
-        env: { [SERVER_ENV]: cpu },
+        env: { [SERVER_ENV]: cpu, ...(process.platform === "win32" ? { NEXTCODE_SEMIF_GFX: "gfx1100" } : {}) },
         inventory: { amd: true, nvidia: false },
         rocmRuntimePresent: false,
       })
       expect(status.active).toBe("cpu")
-      expect(status.fallbackReason).toBe("missing_rocm_runtime")
-      expect(status.systemRuntimeMissing).toBe(true)
+      if (process.platform === "win32") {
+        expect(status.fallbackReason).not.toBe("missing_rocm_runtime")
+        expect(status.message).toContain("not staged")
+      } else {
+        expect(status.fallbackReason).toBe("missing_rocm_runtime")
+        expect(status.systemRuntimeMissing).toBe(true)
+      }
       expect(status.fallbackReason).not.toBe("hip_download_failed")
     })
   })
