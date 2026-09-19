@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { tmpdir } from "node:os"
+import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 import {
   hipPlatformSupported,
   resolveBackend,
@@ -71,10 +72,35 @@ describe("semif backend", () => {
     expect(status.systemRuntimeMissing).toBe(true)
   })
 
+  test("hip does not treat the cpu launcher as a vendored hip binary", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-cpu-only-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const status = resolveBackend({
+        requested: "hip",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallbackReason).toBe("no_vendored_binary")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("hip activates when amd, rocm, and vendored binary are present", () => {
+    if (!hipPlatformSupported()) return
     const root = mkdtempSync(path.join(tmpdir(), "semif-backend-"))
-    const cpu = path.join(root, "llama-server-x86_64-pc-windows-msvc.exe")
-    const hip = path.join(root, "llama-server-x86_64-pc-windows-msvc-hip.exe")
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
     writeFileSync(cpu, "cpu")
     writeFileSync(hip, "hip")
     try {
@@ -85,7 +111,6 @@ describe("semif backend", () => {
         inventory: { amd: true, nvidia: false },
         rocmRuntimePresent: true,
       })
-      if (!hipPlatformSupported("win32", "x64")) return
       expect(status.active).toBe("hip")
       expect(status.fallback).toBe(false)
       expect(status.systemRuntimeMissing).toBe(false)

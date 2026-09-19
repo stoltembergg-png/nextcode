@@ -90,16 +90,24 @@ export function resolveServerPath(input: ServerPathInput = {}): string | undefin
   return undefined
 }
 
-function serverPathForVariant(serverPath: string, variant: BackendVariant): string {
+function variantSuffix(variant: Exclude<BackendVariant, "cpu">): string {
+  if (variant === "hip") return "-hip"
+  if (variant === "cuda") return "-cuda"
+  return "-vulkan"
+}
+
+function serverPathForVariant(serverPath: string, variant: BackendVariant): string | undefined {
   if (variant === "cpu") return serverPath
   const ext = path.extname(serverPath)
   const base = ext ? serverPath.slice(0, -ext.length) : serverPath
-  const hip = `${base}-hip${ext}`
-  if (variant === "hip" && existsSync(hip)) return hip
+  const suffix = variantSuffix(variant)
+  if (base.endsWith(suffix)) return serverPath
+  const derived = `${base}${suffix}${ext}`
+  if (existsSync(derived)) return derived
   const triple = hostTarget()
   const named = path.join(path.dirname(serverPath), stagedServerName(triple, variant, ext === ".exe"))
   if (existsSync(named)) return named
-  return serverPath
+  return undefined
 }
 
 function defaultDevServerPath(variant: BackendVariant): string {
