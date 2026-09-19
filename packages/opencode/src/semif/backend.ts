@@ -48,7 +48,15 @@ export interface ResolveInput {
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
 
-export const ROCM_RUNTIME_LIBS = ["libhipblas.so.3", "librocblas.so.5", "libamdhip64.so.7"] as const
+// Linux ggml-hip links against the system ROCm stack. The vendored archive omits
+// these libraries and expects them from /opt/rocm or the loader search path.
+export const ROCM_RUNTIME_LIBS_LINUX = ["libhipblas.so.3", "librocblas.so.5", "libamdhip64.so.7"] as const
+
+// Windows win-rocm archives bundle amdhip64_7.dll but still require the HIP SDK
+// blas stack (hipblas/rocblas and Tensile data) from a ROCm/TheRock install.
+export const ROCM_RUNTIME_LIBS_WIN = ["hipblas.dll", "rocblas.dll"] as const
+
+export const ROCM_RUNTIME_LIBS = ROCM_RUNTIME_LIBS_LINUX
 
 export function hipPlatformSupported(platform = process.platform, arch = process.arch): boolean {
   return HIP_HOSTS.has(`${platform}-${arch}`)
@@ -95,12 +103,33 @@ function readWindowsGpuInventory(): GpuInventory {
   return inventory
 }
 
-export function rocmRuntimeSearchPaths(env: Record<string, string | undefined> = process.env): string[] {
+export function rocmRuntimeLibraries(platform = process.platform): readonly string[] {
+  if (platform === "win32") return ROCM_RUNTIME_LIBS_WIN
+  return ROCM_RUNTIME_LIBS_LINUX
+}
+
+export function rocmRuntimeSearchPaths(
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): string[] {
   const paths = new Set<string>()
   const add = (value: string | undefined) => {
     const trimmed = value?.trim()
     if (trimmed) paths.add(trimmed)
   }
+
+  if (platform === "win32") {
+    add(env.ROCM_PATH ? path.join(env.ROCM_PATH, "bin") : undefined)
+    add(env.HIP_PATH ? path.join(env.HIP_PATH, "bin") : undefined)
+    const home = env.USERPROFILE ?? env.HOME
+    if (home) add(path.join(home, "TheRock", "bin"))
+    if (env["ProgramFiles"]) add(path.join(env["ProgramFiles"], "AMD", "ROCm", "bin"))
+    if (env.PATH) {
+      for (const entry of env.PATH.split(path.delimiter)) add(entry)
+    }
+    return [...paths]
+  }
+
   add(env.ROCM_PATH ? path.join(env.ROCM_PATH, "bin") : undefined)
   add(env.ROCM_PATH ? path.join(env.ROCM_PATH, "lib") : undefined)
   add("/opt/rocm/lib")
@@ -116,12 +145,15 @@ export function rocmRuntimeSearchPaths(env: Record<string, string | undefined> =
   return [...paths]
 }
 
-export function rocmRuntimePresentAt(paths: ReadonlyArray<string>): boolean {
-  return ROCM_RUNTIME_LIBS.every((library) => paths.some((dir) => existsSync(path.join(dir, library))))
+export function rocmRuntimePresentAt(paths: ReadonlyArray<string>, platform = process.platform): boolean {
+  return rocmRuntimeLibraries(platform).every((library) => paths.some((dir) => existsSync(path.join(dir, library))))
 }
 
-export function rocmRuntimePresent(env: Record<string, string | undefined> = process.env): boolean {
-  return rocmRuntimePresentAt(rocmRuntimeSearchPaths(env))
+export function rocmRuntimePresent(
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): boolean {
+  return rocmRuntimePresentAt(rocmRuntimeSearchPaths(env, platform), platform)
 }
 
 export function vendoredBinaryExists(

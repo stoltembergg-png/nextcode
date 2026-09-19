@@ -119,17 +119,43 @@ describe("semif backend", () => {
     }
   })
 
-  test("rocm runtime detection requires all blas libraries", () => {
+  test("linux rocm runtime detection requires all blas shared objects", () => {
     const root = mkdtempSync(path.join(tmpdir(), "semif-rocm-"))
     const libdir = path.join(root, "lib")
     mkdirSync(libdir)
     writeFileSync(path.join(libdir, "libhipblas.so.3"), "")
     writeFileSync(path.join(libdir, "librocblas.so.5"), "")
     try {
-      expect(rocmRuntimePresentAt([libdir])).toBe(false)
+      expect(rocmRuntimePresentAt([libdir], "linux")).toBe(false)
       writeFileSync(path.join(libdir, "libamdhip64.so.7"), "")
-      expect(rocmRuntimePresentAt([libdir])).toBe(true)
-      expect(rocmRuntimeSearchPaths({ ROCM_PATH: root }).some((entry) => entry.includes("lib"))).toBe(true)
+      expect(rocmRuntimePresentAt([libdir], "linux")).toBe(true)
+      expect(rocmRuntimeSearchPaths({ ROCM_PATH: root }, "linux").some((entry) => entry.includes("lib"))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("windows does not treat bundled amdhip64 as sufficient system runtime", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "semif-rocm-win-amdhip-"))
+    writeFileSync(path.join(root, "amdhip64_7.dll"), "")
+    try {
+      expect(rocmRuntimePresentAt([root], "win32")).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("windows rocm runtime detection requires hipblas and rocblas dlls", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "semif-rocm-win-"))
+    const bindir = path.join(root, "bin")
+    mkdirSync(bindir)
+    writeFileSync(path.join(bindir, "hipblas.dll"), "")
+    try {
+      expect(rocmRuntimePresentAt([bindir], "win32")).toBe(false)
+      writeFileSync(path.join(bindir, "rocblas.dll"), "")
+      expect(rocmRuntimePresentAt([bindir], "win32")).toBe(true)
+      expect(rocmRuntimePresentAt([bindir], "linux")).toBe(false)
+      expect(rocmRuntimeSearchPaths({ ROCM_PATH: root }, "win32")).toContain(bindir)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
