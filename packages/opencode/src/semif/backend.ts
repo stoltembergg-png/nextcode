@@ -240,6 +240,15 @@ function resolveHip(input: {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
   }
 
+  if (!vendoredBinaryExists("hip", input.serverPath, input.env)) {
+    return fallbackCpu(
+      input.requested,
+      "no_vendored_binary",
+      "semif: vendored HIP llama-server binary is not available in this build; using CPU backend",
+      input.inventory,
+    )
+  }
+
   if (!input.rocmPresent) {
     return fallbackCpu(
       input.requested,
@@ -247,15 +256,6 @@ function resolveHip(input: {
       "semif: system ROCm/HIP runtime (hipblas/rocblas) is not installed; using CPU backend",
       input.inventory,
       true,
-    )
-  }
-
-  if (!vendoredBinaryExists("hip", input.serverPath, input.env)) {
-    return fallbackCpu(
-      input.requested,
-      "no_vendored_binary",
-      "semif: vendored HIP llama-server binary is not available; using CPU backend",
-      input.inventory,
     )
   }
 

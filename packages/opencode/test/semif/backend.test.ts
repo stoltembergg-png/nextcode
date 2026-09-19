@@ -61,15 +61,51 @@ describe("semif backend", () => {
   })
 
   test("missing rocm runtime is reported separately from no amd", () => {
-    const status = resolveBackend({
-      requested: "hip",
-      inventory: { amd: true, nvidia: false },
-      rocmRuntimePresent: false,
-    })
     if (!hipPlatformSupported()) return
-    expect(status.active).toBe("cpu")
-    expect(status.fallbackReason).toBe("missing_rocm_runtime")
-    expect(status.systemRuntimeMissing).toBe(true)
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-rocm-missing-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    try {
+      const status = resolveBackend({
+        requested: "hip",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: false,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallbackReason).toBe("missing_rocm_runtime")
+      expect(status.systemRuntimeMissing).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("cpu-only build reports missing hip binary before missing rocm runtime", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-cpu-only-rocm-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const status = resolveBackend({
+        requested: "hip",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: false,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallbackReason).toBe("no_vendored_binary")
+      expect(status.systemRuntimeMissing).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test("hip does not treat the cpu launcher as a vendored hip binary", () => {
