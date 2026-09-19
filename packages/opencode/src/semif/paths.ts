@@ -14,10 +14,10 @@
 // directory is keyed by the launcher/libraries content so a new vendored build
 // gets a fresh directory and the old one can be garbage-collected.
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { HOST_TARGETS, hostTarget, lockPath, lockTargetKey, stagedServerName } from "../../script/fetch-semif-server"
+import { embeddedLockfile, HOST_TARGETS, hostTarget, lockTargetKey, stagedServerName } from "../../script/fetch-semif-server"
 import type { BackendVariant } from "./backend"
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
@@ -181,9 +181,10 @@ function resolveStagedHipLibsPath(env: Record<string, string | undefined>): stri
 
 export function pinnedHipSha256(): string | undefined {
   try {
-    const lock = JSON.parse(readFileSync(lockPath, "utf8")) as { targets: Record<string, { sha256: string }> }
+    const lock = embeddedLockfile()
     const target = lockTargetKey(hostTarget(), "hip")
-    return lock.targets[target]?.sha256
+    const sha256 = lock.targets[target]?.sha256
+    return typeof sha256 === "string" ? sha256 : undefined
   } catch {
     return undefined
   }
