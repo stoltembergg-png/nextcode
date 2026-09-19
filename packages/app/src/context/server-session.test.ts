@@ -955,6 +955,22 @@ describe("server session", () => {
     expect(store.data.part[message.id]).toEqual([part])
   })
 
+  test("retains a part event until its parent message event arrives", () => {
+    const message = userMessage("message")
+    const part = textPart(message.id, { text: "live" })
+    const store = setup({ child: session("child") }).store
+
+    store.apply({ type: "message.part.updated", properties: { sessionID: "child", part, time: 2 } })
+
+    expect(store.data.message.child).toBeUndefined()
+    expect(store.data.part[message.id]).toEqual([part])
+
+    store.apply({ type: "message.updated", properties: { sessionID: "child", info: message } })
+
+    expect(store.data.message.child).toEqual([message])
+    expect(store.data.part[message.id]).toEqual([part])
+  })
+
   test("clears stale parts when the initial page has none", async () => {
     const pending = deferredResponse()
     const message = userMessage("message")
