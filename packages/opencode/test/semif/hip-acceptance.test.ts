@@ -233,6 +233,33 @@ describe("Debbie smoke matrix (HIP on-demand runtime)", () => {
     expect(blocked.fallbackReason).toBe("no_vendored_binary")
     expect(blocked.fallbackReason).not.toBe("hip_download_failed")
   })
+
+  test("mid-fetch wire shape keeps backendFallback unset (not no_vendored_binary)", () => {
+    if (!hipPlatformSupported()) return
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
+    const fetching = resolveBackend({
+      requested: "auto",
+      serverPath: cpu,
+      env: { [SERVER_ENV]: cpu },
+      inventory: { amd: true, nvidia: false },
+      rocmRuntimePresent: true,
+      hipFetching: true,
+    })
+    expect(fetching.fallback).toBe(false)
+    expect(fetching.fallbackReason).toBeUndefined()
+
+    const settled = resolveBackend({
+      requested: "auto",
+      serverPath: cpu,
+      env: { [SERVER_ENV]: cpu },
+      inventory: { amd: true, nvidia: false },
+      rocmRuntimePresent: true,
+      hipFetching: false,
+    })
+    expect(settled.fallbackReason).toBe("no_vendored_binary")
+  })
 })
 
 describe("Jennie status field map (wire / SemifService.Status)", () => {

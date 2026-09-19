@@ -112,6 +112,7 @@ interface State {
   readonly error?: string
   readonly handle?: SemifSidecar.Handle
   readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }
 
 const layer = Layer.effect(
@@ -164,6 +165,7 @@ const layer = Layer.effect(
         requested: resolved.backend,
         serverPath: resolved.serverPath,
         hipDownloadFailed: current.hipDownloadFailed,
+        hipFetching: current.hipFetching,
       })
       if (backend.message) {
         yield* backend.fallback
@@ -273,6 +275,7 @@ const layer = Layer.effect(
         status: "downloading" as SemifStatus,
         error: undefined,
         hipDownloadFailed: false,
+        hipFetching: true,
       }))
       const exit = yield* provideAcquire(
         SemifHipRuntime.ensure({
@@ -287,7 +290,7 @@ const layer = Layer.effect(
         }),
       ).pipe(Effect.exit)
       live.progress = undefined
-      yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus }))
+      yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus, hipFetching: false }))
       if (Exit.isFailure(exit)) {
         if (loaded.download === "auto") {
           yield* Ref.update(state, (value) => ({ ...value, hipDownloadFailed: true }))

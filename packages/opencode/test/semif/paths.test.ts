@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { tmpdir } from "node:os"
 import { Global } from "@opencode-ai/core/global"
+import { hipPlatformSupported } from "../../src/semif/backend"
+import { readHipLock } from "../../src/semif/hip-runtime"
 import {
   LIBS_ENV,
   SERVER_ENV,
@@ -14,8 +18,10 @@ import {
   resolveServerPath,
   hipRuntimeDir,
   hipRuntimeMarkerPath,
+  pinnedHipSha256,
   runtimeDir,
   runtimeRoot,
+  serverBinaryName,
 } from "../../src/semif/paths"
 
 const HASH = "a4d000c7064bd3b2e42c6845836286a899a4e79cf1791da1a6797b58d575957d"
@@ -80,6 +86,30 @@ describe("semif paths", () => {
     expect(resolveLibsPath({ [LIBS_ENV]: "/resources/semif" })).toBe("/resources/semif")
     expect(resolveLibsPath({ [LIBS_ENV]: "   " })).toBe(undefined)
     expect(resolveLibsPath({})).toBe(undefined)
+  })
+
+  test("staged HIP path resolves only the lock-pinned hip-<sha12> directory", async () => {
+    if (!hipPlatformSupported()) return
+    const hip = await readHipLock()
+    if (!hip) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-paths-hip-lock-"))
+    const previousData = Global.Path.data
+    Object.assign(Global.Path, { data: root })
+    const stale = hipRuntimeDir("0000000000000000000000000000000000000000000000000000000000000001")
+    const current = hipRuntimeDir(hip.entry.sha256)
+    mkdirSync(stale, { recursive: true })
+    mkdirSync(current, { recursive: true })
+    writeFileSync(path.join(stale, serverBinaryName()), "stale")
+    writeFileSync(path.join(current, serverBinaryName()), "current")
+    writeFileSync(path.join(current, ".hip-runtime.json"), "{}")
+    try {
+      expect(pinnedHipSha256()).toBe(hip.entry.sha256)
+      expect(resolveServerPath({ variant: "hip" })).toBe(path.join(current, serverBinaryName()))
+      expect(resolveLibsPath({}, "hip")).toBe(current)
+    } finally {
+      Object.assign(Global.Path, { data: previousData })
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   test("hip server and libs paths prefer hip-specific locations", () => {

@@ -46,6 +46,7 @@ export interface ResolveInput {
   readonly inventory?: GpuInventory
   readonly rocmRuntimePresent?: boolean
   readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
@@ -189,6 +190,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
       inventory,
       rocmPresent,
       hipDownloadFailed: input.hipDownloadFailed,
+      hipFetching: input.hipFetching,
     })
   }
 
@@ -221,6 +223,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
     inventory,
     rocmPresent,
     hipDownloadFailed: input.hipDownloadFailed,
+    hipFetching: input.hipFetching,
   })
 }
 
@@ -231,6 +234,7 @@ function resolveHip(input: {
   readonly inventory: GpuInventory
   readonly rocmPresent: boolean
   readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }): BackendStatus {
   if (!hipPlatformSupported()) {
     return fallbackCpu(
@@ -255,6 +259,17 @@ function resolveHip(input: {
   }
 
   if (!vendoredBinaryExists("hip", input.serverPath, input.env)) {
+    if (input.hipFetching) {
+      return {
+        requested: input.requested,
+        active: "cpu",
+        fallback: false,
+        systemRuntimeMissing: false,
+        amdGpu: input.inventory.amd,
+        nvidiaGpu: input.inventory.nvidia,
+        message: "semif: fetching HIP runtime",
+      }
+    }
     return fallbackCpu(
       input.requested,
       "no_vendored_binary",

@@ -14,10 +14,10 @@
 // directory is keyed by the launcher/libraries content so a new vendored build
 // gets a fresh directory and the old one can be garbage-collected.
 
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { HOST_TARGETS, stagedServerName } from "../../script/fetch-semif-server"
+import { HOST_TARGETS, hostTarget, lockPath, lockTargetKey, stagedServerName } from "../../script/fetch-semif-server"
 import type { BackendVariant } from "./backend"
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
@@ -179,18 +179,28 @@ function resolveStagedHipLibsPath(env: Record<string, string | undefined>): stri
   return dir
 }
 
-function readStagedHipRuntimeDir(_env: Record<string, string | undefined>): string | undefined {
-  const root = runtimeRoot()
-  if (!existsSync(root)) return undefined
-  for (const entry of readdirSync(root)) {
-    if (!entry.startsWith("hip-")) continue
-    const dir = path.join(root, entry)
-    const markerPath = path.join(dir, ".hip-runtime.json")
-    if (existsSync(markerPath)) return dir
-    const binary = path.join(dir, serverBinaryName())
-    if (existsSync(binary)) return dir
+export function pinnedHipSha256(): string | undefined {
+  try {
+    const lock = JSON.parse(readFileSync(lockPath, "utf8")) as { targets: Record<string, { sha256: string }> }
+    const target = lockTargetKey(hostTarget(), "hip")
+    return lock.targets[target]?.sha256
+  } catch {
+    return undefined
   }
-  return undefined
+}
+
+function stagedHipRuntimeDirComplete(dir: string): boolean {
+  const markerPath = path.join(dir, ".hip-runtime.json")
+  if (existsSync(markerPath)) return true
+  return existsSync(path.join(dir, serverBinaryName()))
+}
+
+function readStagedHipRuntimeDir(_env: Record<string, string | undefined>): string | undefined {
+  const sha256 = pinnedHipSha256()
+  if (!sha256) return undefined
+  const dir = hipRuntimeDir(sha256)
+  if (!stagedHipRuntimeDirComplete(dir)) return undefined
+  return dir
 }
 
 function readString(value: string | undefined): string | undefined {
