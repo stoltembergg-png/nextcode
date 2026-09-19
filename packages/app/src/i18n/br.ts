@@ -805,6 +805,18 @@ export const dict = {
   "semif.action.retry": "Tentar de novo",
   "semif.progress.percent": "{{percent}}",
   "semif.model.label": "Local model",
+
+  "semif.backend.label": "Backend de computação",
+  "semif.backend.hip_active": "HIP/ROCm (GPU AMD)",
+  "semif.backend.system_runtime_missing": "Runtime ROCm/HIP do sistema ausente (hipblas/rocblas)",
+  "semif.backend.fallback.unknown": "Usando CPU",
+  "semif.backend.fallback.manual_cpu": "Usando CPU (configurado)",
+  "semif.backend.fallback.platform_unsupported": "Usando CPU — HIP/ROCm não suportado nesta plataforma",
+  "semif.backend.fallback.mixed_gpus": "Usando CPU — GPUs AMD e NVIDIA mistas; defina o backend explicitamente",
+  "semif.backend.fallback.no_amd_gpu": "Usando CPU — nenhuma GPU AMD detectada",
+  "semif.backend.fallback.missing_rocm_runtime": "Usando CPU — runtime ROCm/HIP do sistema ausente",
+  "semif.backend.fallback.no_vendored_binary": "Usando CPU — binário HIP não incluso nesta build",
+  "semif.backend.fallback.unsupported_variant": "Usando CPU — backend solicitado indisponível",
   "session.share.popover.title": "Publicar na web",
   "session.share.popover.description.shared":
     "Esta sessão é pública na web. Está acessível para qualquer pessoa com o link.",
