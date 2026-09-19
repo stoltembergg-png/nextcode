@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
   downloadCandidates,
+  embeddedLockfile,
   HOST_TARGETS,
   hostTarget,
   lockTargetKey,
   publishedMirrorUrl,
+  readLockfile,
   stagedLibsDir,
   stagedServerName,
   type Lockfile,
@@ -34,6 +36,21 @@ describe("fetch-semif-server", () => {
   test("stages hip libraries in a separate resource directory", () => {
     expect(stagedLibsDir("cpu")).toMatch(/\/semif$/)
     expect(stagedLibsDir("hip")).toMatch(/\/semif-hip$/)
+  })
+
+  test("embedded lockfile pins hip targets for the host triple", () => {
+    const lock = embeddedLockfile()
+    const hip = lock.targets[lockTargetKey(hostTarget(), "hip")]
+    expect(lock.tag).toBeTruthy()
+    expect(hip?.asset).toMatch(/hip|rocm/i)
+    expect(typeof hip?.bytes).toBe("number")
+    expect(hip?.sha256).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  test("readLockfile resolves from the embedded lock without filesystem reads", async () => {
+    const lock = await readLockfile()
+    expect(lock).toBe(embeddedLockfile())
+    expect(lock.targets[lockTargetKey(hostTarget(), "hip")]).toBeDefined()
   })
 
   test("builds published mirror urls from the lock target", () => {

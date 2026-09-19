@@ -25,6 +25,7 @@ import { $ } from "bun"
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
+import embeddedSemifServerLock from "./semif-server.lock.json" with { type: "json" }
 
 export const UPSTREAM_BASE = "https://github.com/ggml-org/llama.cpp/releases/download"
 export const MIRROR_REPO = "stoltembergg-png/nextcode"
@@ -62,8 +63,17 @@ const binariesDir = path.join(tauri, "binaries")
 const cacheDir = path.join(tauri, ".semif-cache")
 export const lockPath = path.join(import.meta.dir, "semif-server.lock.json")
 
+// Bundled opencode resolves `import.meta.dir` under `~BUN/root/...`, where the JSON
+// file is not shipped. Import the lock so `bun build --compile` embeds it, then keep
+// an immutable in-memory copy for runtime reads.
+const cachedLockfile: Lockfile = JSON.parse(JSON.stringify(embeddedSemifServerLock)) as Lockfile
+
+export function embeddedLockfile(): Lockfile {
+  return cachedLockfile
+}
+
 export async function readLockfile(): Promise<Lockfile> {
-  return (await Bun.file(lockPath).json()) as Lockfile
+  return embeddedLockfile()
 }
 
 export function archiveExtension(asset: string): ".zip" | ".tar.gz" {
@@ -133,7 +143,7 @@ export function stagedLibsDir(variant: SemifVariant): string {
 }
 
 export async function stageSemifServer(options: StageOptions = {}) {
-  const lock = (await Bun.file(lockPath).json()) as Lockfile
+  const lock = embeddedLockfile()
   const variant = options.variant ?? "cpu"
   const baseTarget = options.target ?? hostTarget()
   const target = lockTargetKey(baseTarget, variant)
