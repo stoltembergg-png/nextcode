@@ -4,6 +4,7 @@ import { assertSemifPaths, checkSemifPaths, parseSemifOptions } from "../../src/
 
 const ENV_KEYS = [
   "SEMIF_MODE",
+  "SEMIF_BACKEND",
   "SEMIF_MODEL_PATH",
   "SEMIF_SERVER_PATH",
   "SEMIF_HOST",
@@ -38,6 +39,7 @@ describe("semif config", () => {
     await withEnv({}, () => {
       const cfg = parseSemifOptions()
       expect(cfg.mode).toBe("auto")
+      expect(cfg.backend).toBe("auto")
       expect(cfg.host).toBe("127.0.0.1")
       expect(cfg.port).toBe(8817)
       expect(cfg.threads).toBe(expectedThreads)
@@ -54,6 +56,7 @@ describe("semif config", () => {
     await withEnv({}, () => {
       const cfg = parseSemifOptions({
         mode: "lazy",
+        backend: "hip",
         host: "0.0.0.0",
         port: 1234,
         threads: 3,
@@ -65,6 +68,7 @@ describe("semif config", () => {
         serverPath: "/bin/llama-server",
       })
       expect(cfg.mode).toBe("lazy")
+      expect(cfg.backend).toBe("hip")
       expect(cfg.host).toBe("0.0.0.0")
       expect(cfg.port).toBe(1234)
       expect(cfg.threads).toBe(3)
@@ -81,6 +85,7 @@ describe("semif config", () => {
     await withEnv(
       {
         SEMIF_MODE: "off",
+        SEMIF_BACKEND: "cpu",
         SEMIF_MODEL_PATH: "/env/model.gguf",
         SEMIF_SERVER_PATH: "/env/llama-server",
         SEMIF_HOST: "0.0.0.0",
@@ -94,6 +99,7 @@ describe("semif config", () => {
       () => {
         const fromEnv = parseSemifOptions()
         expect(fromEnv.mode).toBe("off")
+        expect(fromEnv.backend).toBe("cpu")
         expect(fromEnv.modelPath).toBe("/env/model.gguf")
         expect(fromEnv.serverPath).toBe("/env/llama-server")
         expect(fromEnv.host).toBe("0.0.0.0")
@@ -129,6 +135,7 @@ describe("semif config", () => {
   test("rejects invalid mode and out-of-range numbers", async () => {
     await withEnv({}, () => {
       expect(() => parseSemifOptions({ mode: "sometimes" })).toThrow(/mode must be/)
+      expect(() => parseSemifOptions({ backend: "metal" })).toThrow(/backend must be/)
       expect(() => parseSemifOptions({ port: 70000 })).toThrow(/port must be/)
       expect(() => parseSemifOptions({ port: 0 })).toThrow(/port must be/)
       expect(() => parseSemifOptions({ threads: 0 })).toThrow(/threads must be/)

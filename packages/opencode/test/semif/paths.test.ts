@@ -75,4 +75,12 @@ describe("semif paths", () => {
     expect(resolveLibsPath({ [LIBS_ENV]: "   " })).toBe(undefined)
     expect(resolveLibsPath({})).toBe(undefined)
   })
+
+  test("hip server and libs paths prefer hip-specific locations", () => {
+    const cpu = "/bundle/llama-server-x86_64-pc-windows-msvc.exe"
+    const hip = "/bundle/llama-server-x86_64-pc-windows-msvc-hip.exe"
+    expect(resolveServerPath({ configPath: hip, variant: "hip" })).toBe(hip)
+    expect(resolveServerPath({ configPath: cpu, variant: "hip", env: { [SERVER_ENV]: cpu } })).toBe(cpu)
+    expect(resolveLibsPath({ NEXTCODE_SEMIF_HIP_LIBS_PATH: "/resources/semif-hip" }, "hip")).toBe("/resources/semif-hip")
+  })
 })

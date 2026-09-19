@@ -6,6 +6,11 @@
       "bytes": 18439226,
       "sha256": "762bd68fdd59a7dbdda420fbaea2436848c63cf17572e8e6ae58d1411ecef6bf"
     },
+    "x86_64-pc-windows-msvc-hip": {
+      "asset": "llama-b11040-bin-win-rocm-10.0-x64.zip",
+      "bytes": 256090887,
+      "sha256": "fdd60a83f7c705eb8654657971ada8e71816d94ddd057868db97516331081f65"
+    },
     "aarch64-apple-darwin": {
       "asset": "llama-b11040-bin-macos-arm64.tar.gz",
       "bytes": 11156518,
@@ -15,6 +20,16 @@
       "asset": "llama-b11040-bin-macos-x64.tar.gz",
       "bytes": 11204932,
       "sha256": "60b7b18b51cd21eaf1cedc5a2264807ddd3a31266aef27c43603fc4470f3e66c"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "asset": "llama-b11040-bin-ubuntu-x64.tar.gz",
+      "bytes": 16856201,
+      "sha256": "f360fb973674de71f3bd7a8c7b890887a4863559e8c291e226ae6caa08df1fc4"
+    },
+    "x86_64-unknown-linux-gnu-hip": {
+      "asset": "llama-b11040-bin-ubuntu-rocm-10.0-x64.tar.gz",
+      "bytes": 239071458,
+      "sha256": "6064453cf71fa1bddb864ba57ad8dd616a7dbe07a2aab5938f6253ac024a0165"
     }
   }
 }

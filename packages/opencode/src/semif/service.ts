@@ -16,6 +16,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { SemifAcquire } from "./acquire"
+import { SemifBackend, type BackendVariant } from "./backend"
 import { parseSemifOptions, type SemifMode } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
@@ -54,6 +55,12 @@ export interface Status {
   readonly status: SemifStatus
   readonly mode: SemifMode
   readonly download: DownloadPolicy
+  readonly backend: BackendVariant
+  readonly backendRequested: SemifBackend.BackendPreference
+  readonly backendFallback: boolean
+  readonly backendFallbackReason?: SemifBackend.BackendFallbackReason
+  readonly backendMessage?: string
+  readonly systemRuntimeMissing: boolean
   readonly model?: Models
   readonly modelPath?: string
   readonly serverPath?: string
@@ -132,6 +139,7 @@ const layer = Layer.effect(
       const entry = SemifManifest.find(block?.model)
       const resolved = parseSemifOptions({
         mode: block?.mode,
+        backend: block?.backend,
         modelPath: block?.model_path,
         serverPath: block?.server_path,
         port: block?.port,
@@ -141,10 +149,26 @@ const layer = Layer.effect(
         cacheSize: block?.cacheSize,
         host: block?.host,
       })
+      const backend = SemifBackend.inspect({
+        requested: resolved.backend,
+        serverPath: resolved.serverPath,
+      })
+      if (backend.message) {
+        yield* backend.fallback
+          ? Effect.logWarning(backend.message, {
+              requested: backend.requested,
+              active: backend.active,
+              reason: backend.fallbackReason,
+              systemRuntimeMissing: backend.systemRuntimeMissing,
+            })
+          : Effect.logInfo(backend.message, { active: backend.active })
+      }
+      const activeVariant = backend.active
       return {
         entry,
         download: (block?.download ?? "auto") as DownloadPolicy,
         resolved,
+        backend,
         modelPath: entry
           ? SemifPaths.resolveModelPath({
               configPath: resolved.modelPath,
@@ -152,8 +176,8 @@ const layer = Layer.effect(
               filename: entry.filename,
             })
           : undefined,
-        serverPath: SemifPaths.resolveServerPath({ configPath: resolved.serverPath }),
-        libsPath: SemifPaths.resolveLibsPath(),
+        serverPath: SemifPaths.resolveServerPath({ configPath: resolved.serverPath, variant: activeVariant }),
+        libsPath: SemifPaths.resolveLibsPath(undefined, activeVariant),
       }
     })
 
@@ -163,6 +187,12 @@ const layer = Layer.effect(
       const base = {
         mode: loaded.resolved.mode,
         download: loaded.download,
+        backend: loaded.backend.active,
+        backendRequested: loaded.backend.requested,
+        backendFallback: loaded.backend.fallback,
+        backendFallbackReason: loaded.backend.fallbackReason,
+        backendMessage: loaded.backend.message,
+        systemRuntimeMissing: loaded.backend.systemRuntimeMissing,
         host: loaded.resolved.host,
         port: current.handle?.port ?? loaded.resolved.port,
         pid: current.handle?.pid,
