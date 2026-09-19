@@ -63,6 +63,7 @@ describe("semifBackendFallbackI18nKey", () => {
   test("maps known fallback reasons to i18n keys", () => {
     expect(semifBackendFallbackI18nKey("no_vendored_binary")).toBe("semif.backend.fallback.no_vendored_binary")
     expect(semifBackendFallbackI18nKey("missing_rocm_runtime")).toBe("semif.backend.fallback.missing_rocm_runtime")
+    expect(semifBackendFallbackI18nKey("hip_download_failed")).toBe("semif.backend.fallback.hip_download_failed")
   })
 
   test("uses unknown key when reason is missing", () => {
@@ -100,6 +101,16 @@ describe("semifBackendMessageKey", () => {
         backendFallbackReason: "no_vendored_binary",
       }),
     ).toBe("semif.backend.fallback.no_vendored_binary")
+  })
+
+  test("selects fallback reason copy for HIP download failure", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        backendFallback: true,
+        backendFallbackReason: "hip_download_failed",
+      }),
+    ).toBe("semif.backend.fallback.hip_download_failed")
   })
 })
 

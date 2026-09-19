@@ -289,7 +289,9 @@ const layer = Layer.effect(
       live.progress = undefined
       yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus }))
       if (Exit.isFailure(exit)) {
-        yield* Ref.update(state, (value) => ({ ...value, hipDownloadFailed: true }))
+        if (loaded.download === "auto") {
+          yield* Ref.update(state, (value) => ({ ...value, hipDownloadFailed: true }))
+        }
         yield* Effect.logWarning("semif: HIP runtime download failed", { cause: exit.cause })
         return
       }
@@ -398,6 +400,7 @@ const layer = Layer.effect(
         ),
       acquire: () =>
         Effect.gen(function* () {
+          yield* ensureHipRuntime
           yield* ensureModel
           return yield* snapshot
         }).pipe(

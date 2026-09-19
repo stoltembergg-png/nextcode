@@ -62,6 +62,9 @@ export interface EnsureInput {
   readonly env?: Record<string, string | undefined>
   readonly onProgress?: (progress: Progress) => void
   readonly onPhase?: (phase: "downloading" | "verifying") => void
+  // Test-only: pin download sources and attempts so acceptance tests do not hit upstream mirrors.
+  readonly sources?: readonly string[]
+  readonly maxAttempts?: number
 }
 
 export interface EnsureResult {
@@ -144,7 +147,7 @@ export const ensure = Effect.fn("SemifHipRuntime.ensure")(function* (input: Ensu
   const archive = path.join(SemifPaths.downloadsRoot(), hip.entry.asset)
   const part = SemifPaths.partPath(hip.entry.sha256)
   input.onPhase?.("downloading")
-  const candidates = downloadCandidates(hip.lock, hip.target, hip.entry, input.env)
+  const candidates = input.sources ?? downloadCandidates(hip.lock, hip.target, hip.entry, input.env)
   let lastError = `semif: no download source available for ${hip.entry.asset}`
   let downloaded = false
   for (const url of candidates) {
@@ -153,7 +156,7 @@ export const ensure = Effect.fn("SemifHipRuntime.ensure")(function* (input: Ensu
       part,
       sha256: hip.entry.sha256,
       expectedBytes: hip.entry.bytes,
-      maxAttempts: 2,
+      maxAttempts: input.maxAttempts ?? 2,
       resolveUrl: () => Effect.succeed(url),
       onProgress: input.onProgress,
     }).pipe(Effect.exit)

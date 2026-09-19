@@ -107,6 +107,35 @@ describe("semif HttpApi", () => {
     }),
   )
 
+  it.live("GET /semif/status exposes HIP lifecycle and failure fields for UI mapping", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(SemifPaths.status).pipe(HttpClient.execute)
+      const body = (yield* response.json) as unknown as Status
+
+      expect(response.status).toBe(200)
+      expect(body).toMatchObject({
+        status: "downloading",
+        backendFallbackReason: "platform_unsupported",
+        progress: { received: 37, total: 100 },
+      })
+      expect(["downloading", "verifying", "starting", "ready", "offline", "failed", "not_downloaded"]).toContain(
+        body.status,
+      )
+      expect(
+        [
+          "manual_cpu",
+          "platform_unsupported",
+          "mixed_gpus",
+          "no_amd_gpu",
+          "missing_rocm_runtime",
+          "no_vendored_binary",
+          "hip_download_failed",
+          "unsupported_variant",
+        ],
+      ).toContain(body.backendFallbackReason!)
+    }),
+  )
+
   it.live("POST /semif/start returns the resulting ready status", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(SemifPaths.start).pipe(HttpClient.execute)
