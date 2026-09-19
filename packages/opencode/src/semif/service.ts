@@ -205,7 +205,12 @@ const layer = Layer.effect(
       if (!stale) return
       yield* SemifSidecar.dispose(current.handle)
       SemifScoring.clearCaches()
-      yield* Ref.set(state, { status: "offline" as SemifStatus })
+      yield* Ref.update(state, (value) => ({
+        ...value,
+        status: "offline" as SemifStatus,
+        handle: undefined,
+        error: undefined,
+      }))
     })
 
     const snapshot = Effect.gen(function* () {
@@ -373,7 +378,12 @@ const layer = Layer.effect(
         try: () => SemifScoring.prepare({ url: handle.url }, refreshed.entry?.family ?? "lfm2"),
         catch: (cause) => new SemifServiceError({ reason: errorMessage(cause) }),
       })
-      yield* Ref.set(state, { status: "ready" as SemifStatus, handle })
+      yield* Ref.update(state, (value) => ({
+        ...value,
+        status: "ready" as SemifStatus,
+        handle,
+        error: undefined,
+      }))
       return handle
     })
 
