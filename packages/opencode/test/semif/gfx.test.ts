@@ -6,10 +6,12 @@ import { shouldFetch as shouldFetchRocm } from "../../src/semif/rocm-runtime"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 
 describe("semif gfx", () => {
-  test("gfx1100 is supported and gfx803 is unsupported in the lock matrix", () => {
-    expect(isSupportedGfx("gfx1100")).toBe(true)
+  test("pinned gfx families are supported and gfx803 is unsupported in the lock matrix", () => {
+    for (const gfx of ["gfx1030", "gfx1100", "gfx1150", "gfx1200"]) {
+      expect(isSupportedGfx(gfx)).toBe(true)
+      expect(resolveSupportedGfx({ [GFX_ENV]: gfx })).toBe(gfx)
+    }
     expect(isSupportedGfx("gfx803")).toBe(false)
-    expect(resolveSupportedGfx({ [GFX_ENV]: "gfx1100" })).toBe("gfx1100")
     expect(resolveSupportedGfx({ [GFX_ENV]: "gfx803" })).toBeUndefined()
     expect(unsupportedGfx({ [GFX_ENV]: "gfx803" })).toBe("gfx803")
   })

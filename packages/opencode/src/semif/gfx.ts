@@ -17,6 +17,8 @@ const NAME_TO_GFX: ReadonlyArray<[RegExp, string]> = [
   [/\brx\s*7800\b/i, "gfx1100"],
   [/\brx\s*7700\b/i, "gfx1100"],
   [/\brx\s*7600\b/i, "gfx1100"],
+  [/\brx\s*9[0-9]{3}\b/i, "gfx1200"],
+  [/\brx\s*9070\b/i, "gfx1200"],
   [/\brx\s*5[78]0\b/i, "gfx803"],
   [/\brx\s*580\b/i, "gfx803"],
   [/\brx\s*570\b/i, "gfx803"],

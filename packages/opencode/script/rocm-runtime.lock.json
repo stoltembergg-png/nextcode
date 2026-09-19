@@ -16,11 +16,29 @@
     }
   },
   "devices": {
+    "gfx1030": {
+      "asset": "rocm_sdk_device_gfx1030-10.0.0-py3-none-win_amd64.whl",
+      "url": "https://stable.repo.amd.com/rocm/core/whl-next/rocm-sdk-device-gfx1030/rocm_sdk_device_gfx1030-10.0.0-py3-none-win_amd64.whl",
+      "bytes": 52153384,
+      "sha256": "19ada0359b499c19c1ecb1cba21b067fce89b4f0b0de6f0f7b76cbef85dcb85b"
+    },
     "gfx1100": {
       "asset": "rocm_sdk_device_gfx1100-10.0.0-py3-none-win_amd64.whl",
       "url": "https://stable.repo.amd.com/rocm/core/whl-next/rocm-sdk-device-gfx1100/rocm_sdk_device_gfx1100-10.0.0-py3-none-win_amd64.whl",
       "bytes": 189830160,
       "sha256": "db39cbc5aae7a67c73d76692899a6a89bbc10eafc92f856f48e9c03247a91f8e"
+    },
+    "gfx1150": {
+      "asset": "rocm_sdk_device_gfx1150-10.0.0-py3-none-win_amd64.whl",
+      "url": "https://stable.repo.amd.com/rocm/core/whl-next/rocm-sdk-device-gfx1150/rocm_sdk_device_gfx1150-10.0.0-py3-none-win_amd64.whl",
+      "bytes": 134574199,
+      "sha256": "22c19fcee580102cdc2f9379edf056643843c86ac6312dcf34d8ed21964c2cc4"
+    },
+    "gfx1200": {
+      "asset": "rocm_sdk_device_gfx1200-10.0.0-py3-none-win_amd64.whl",
+      "url": "https://stable.repo.amd.com/rocm/core/whl-next/rocm-sdk-device-gfx1200/rocm_sdk_device_gfx1200-10.0.0-py3-none-win_amd64.whl",
+      "bytes": 377648520,
+      "sha256": "f33226078932ee2200f5595c521895edf5d7abf3170975d8c6f72a2a3949f516"
     }
   }
 }
