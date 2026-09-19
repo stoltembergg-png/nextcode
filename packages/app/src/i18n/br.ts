@@ -818,6 +818,8 @@ export const dict = {
   "semif.backend.fallback.platform_unsupported": "Usando CPU — HIP/ROCm não suportado nesta plataforma",
   "semif.backend.fallback.mixed_gpus": "Usando CPU — GPUs AMD e NVIDIA mistas; defina o backend explicitamente",
   "semif.backend.fallback.no_amd_gpu": "Usando CPU — nenhuma GPU AMD detectada",
+  "semif.backend.fallback.gpu_unsupported":
+    "Usando CPU — GPU não suportada para HIP neste SO (fora da matriz AMD suportada)",
   "semif.backend.fallback.missing_rocm_runtime": "Usando CPU — runtime ROCm/HIP do sistema ausente",
   "semif.backend.fallback.no_vendored_binary": "Usando CPU — binário HIP não incluso nesta build",
   "semif.backend.fallback.unsupported_variant": "Usando CPU — backend solicitado indisponível",

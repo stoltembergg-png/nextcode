@@ -50,6 +50,7 @@ export const SemifStatusSchema = Schema.Struct({
       "platform_unsupported",
       "mixed_gpus",
       "no_amd_gpu",
+      "gpu_unsupported",
       "missing_rocm_runtime",
       "no_vendored_binary",
       "hip_download_failed",
