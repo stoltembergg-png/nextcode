@@ -1097,12 +1097,9 @@ export function createServerSession(
         const messages = data.message[part.sessionID]
         const load = messageLoads.get(part.sessionID)
         const missing = !messages?.some((message) => message.id === part.messageID)
-        // Outside a page load, accepting a part without its ordered parent event would create an unbounded orphan.
         if (
           missing &&
-          (!load ||
-            load.clearedMessageParts.has(part.messageID) ||
-            removedMessages.get(part.sessionID)?.has(part.messageID))
+          (load?.clearedMessageParts.has(part.messageID) || removedMessages.get(part.sessionID)?.has(part.messageID))
         )
           return
         if (missing) {
