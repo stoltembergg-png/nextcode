@@ -17,7 +17,7 @@
 import { existsSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
-import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
+import { HOST_TARGETS, stagedServerName } from "../../script/fetch-semif-server"
 import type { BackendVariant } from "./backend"
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
@@ -104,18 +104,24 @@ function serverPathForVariant(serverPath: string, variant: BackendVariant): stri
   if (base.endsWith(suffix)) return serverPath
   const derived = `${base}${suffix}${ext}`
   if (existsSync(derived)) return derived
-  const triple = hostTarget()
+  const triple = hostTargetOrUndefined()
+  if (!triple) return undefined
   const named = path.join(path.dirname(serverPath), stagedServerName(triple, variant, ext === ".exe"))
   if (existsSync(named)) return named
   return undefined
 }
 
-function defaultDevServerPath(variant: BackendVariant): string {
+function defaultDevServerPath(variant: BackendVariant): string | undefined {
   // An unbundled build often stages the runtime next to the current executable.
   // Production shells pass `NEXTCODE_SEMIF_SERVER_PATH` instead, which wins above.
-  const triple = hostTarget()
+  const triple = hostTargetOrUndefined()
+  if (!triple) return undefined
   const isZip = process.platform === "win32"
   return path.join(path.dirname(process.execPath), stagedServerName(triple, variant, isZip))
+}
+
+function hostTargetOrUndefined(): string | undefined {
+  return HOST_TARGETS[`${process.platform}-${process.arch}`]
 }
 
 // Directory holding the launcher's shared libraries, supplied by the desktop
@@ -125,7 +131,7 @@ export function resolveLibsPath(
   env: Record<string, string | undefined> = process.env,
   variant: BackendVariant = "cpu",
 ): string | undefined {
-  if (variant === "hip") return readString(env[LIBS_HIP_ENV]) ?? readString(env[LIBS_ENV])
+  if (variant === "hip") return readString(env[LIBS_HIP_ENV])
   return readString(env[LIBS_ENV])
 }
 
