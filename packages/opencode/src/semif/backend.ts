@@ -210,10 +210,7 @@ function readWindowsAmdDeviceIds(): string[] {
     stderr: "pipe",
     timeout: 3000,
   })
-  if (!result.success) {
-    cachedWindowsAmdDeviceIds = []
-    return cachedWindowsAmdDeviceIds
-  }
+  if (!result.success) return []
   const ids = result.stdout
     .toString("utf8")
     .split(/\r?\n/)
