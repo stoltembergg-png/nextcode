@@ -85,6 +85,55 @@ describe("semif backend", () => {
     }
   })
 
+  test("mid-fetch HIP download does not report no_vendored_binary", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-fetching-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: true,
+        hipFetching: true,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallback).toBe(false)
+      expect(status.fallbackReason).toBeUndefined()
+      expect(status.message).toContain("fetching HIP runtime")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("hip download failure is reported before missing vendored binary", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-download-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const status = resolveBackend({
+        requested: "hip",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: false,
+        hipDownloadFailed: true,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallbackReason).toBe("hip_download_failed")
+      expect(status.systemRuntimeMissing).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("cpu-only build reports missing hip binary before missing rocm runtime", () => {
     if (!hipPlatformSupported()) return
     const root = mkdtempSync(path.join(tmpdir(), "semif-backend-cpu-only-rocm-"))

@@ -19,6 +19,7 @@ export type BackendFallbackReason =
   | "no_amd_gpu"
   | "missing_rocm_runtime"
   | "no_vendored_binary"
+  | "hip_download_failed"
   | "unsupported_variant"
 
 export interface GpuInventory {
@@ -44,6 +45,8 @@ export interface ResolveInput {
   readonly env?: Record<string, string | undefined>
   readonly inventory?: GpuInventory
   readonly rocmRuntimePresent?: boolean
+  readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
@@ -186,6 +189,8 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
       env,
       inventory,
       rocmPresent,
+      hipDownloadFailed: input.hipDownloadFailed,
+      hipFetching: input.hipFetching,
     })
   }
 
@@ -217,6 +222,8 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
     env,
     inventory,
     rocmPresent,
+    hipDownloadFailed: input.hipDownloadFailed,
+    hipFetching: input.hipFetching,
   })
 }
 
@@ -226,6 +233,8 @@ function resolveHip(input: {
   readonly env: Record<string, string | undefined>
   readonly inventory: GpuInventory
   readonly rocmPresent: boolean
+  readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }): BackendStatus {
   if (!hipPlatformSupported()) {
     return fallbackCpu(
@@ -240,7 +249,27 @@ function resolveHip(input: {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
   }
 
+  if (input.hipDownloadFailed) {
+    return fallbackCpu(
+      input.requested,
+      "hip_download_failed",
+      "semif: HIP runtime download failed; using CPU backend",
+      input.inventory,
+    )
+  }
+
   if (!vendoredBinaryExists("hip", input.serverPath, input.env)) {
+    if (input.hipFetching) {
+      return {
+        requested: input.requested,
+        active: "cpu",
+        fallback: false,
+        systemRuntimeMissing: false,
+        amdGpu: input.inventory.amd,
+        nvidiaGpu: input.inventory.nvidia,
+        message: "semif: fetching HIP runtime",
+      }
+    }
     return fallbackCpu(
       input.requested,
       "no_vendored_binary",

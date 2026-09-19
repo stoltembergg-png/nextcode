@@ -26,17 +26,18 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipReader } from "@zip.js/zip.js"
 
-const UPSTREAM_BASE = "https://github.com/ggml-org/llama.cpp/releases/download"
+export const UPSTREAM_BASE = "https://github.com/ggml-org/llama.cpp/releases/download"
+export const MIRROR_REPO = "stoltembergg-png/nextcode"
 
 export type SemifVariant = "cpu" | "hip" | "cuda" | "vulkan"
 
-interface TargetLock {
+export interface TargetLock {
   asset: string
   bytes: number
   sha256: string
 }
 
-interface Lockfile {
+export interface Lockfile {
   tag: string
   targets: Record<string, TargetLock>
 }
@@ -59,7 +60,33 @@ const repo = path.resolve(import.meta.dir, "../../..")
 const tauri = path.join(repo, "packages/desktop/src-tauri")
 const binariesDir = path.join(tauri, "binaries")
 const cacheDir = path.join(tauri, ".semif-cache")
-const lockPath = path.join(import.meta.dir, "semif-server.lock.json")
+export const lockPath = path.join(import.meta.dir, "semif-server.lock.json")
+
+export async function readLockfile(): Promise<Lockfile> {
+  return (await Bun.file(lockPath).json()) as Lockfile
+}
+
+export function archiveExtension(asset: string): ".zip" | ".tar.gz" {
+  return asset.endsWith(".tar.gz") ? ".tar.gz" : ".zip"
+}
+
+export function publishedMirrorUrl(lock: Lockfile, target: string, entry: TargetLock): string {
+  const ext = archiveExtension(entry.asset)
+  const tag = `semif-server-${lock.tag}`
+  return `https://github.com/${MIRROR_REPO}/releases/download/${tag}/semif-server-${lock.tag}-${target}${ext}`
+}
+
+export function downloadCandidates(
+  lock: Lockfile,
+  target: string,
+  entry: TargetLock,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const mirror = env.NEXTCODE_SEMIF_MIRROR?.trim()
+  const upstream = `${UPSTREAM_BASE}/${lock.tag}/${entry.asset}`
+  const published = publishedMirrorUrl(lock, target, entry)
+  return [mirror, published, upstream].filter((url): url is string => Boolean(url))
+}
 
 export const HOST_TARGETS: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
@@ -131,7 +158,7 @@ export async function stageSemifServer(options: StageOptions = {}) {
   mkdirSync(cacheDir, { recursive: true })
   mkdirSync(binariesDir, { recursive: true })
 
-  const archive = await ensureArchive(lock.tag, entry)
+  const archive = await ensureArchive(lock, target, entry)
   console.log(`archive verified: ${archive} (${entry.bytes} bytes)`)
 
   if (options.downloadOnly) {
@@ -177,7 +204,7 @@ async function isUpToDate(markerPath: string, tag: string, entry: TargetLock): P
   return marker.staged.every((file) => existsSync(file.path) && statSync(file.path).size === file.bytes)
 }
 
-async function ensureArchive(tag: string, entry: TargetLock): Promise<string> {
+async function ensureArchive(lock: Lockfile, target: string, entry: TargetLock): Promise<string> {
   const archive = path.join(cacheDir, entry.asset)
   if (existsSync(archive)) {
     const cached = await inspect(archive)
@@ -186,9 +213,7 @@ async function ensureArchive(tag: string, entry: TargetLock): Promise<string> {
     rmSync(archive, { force: true })
   }
 
-  const candidates = [process.env.NEXTCODE_SEMIF_MIRROR, `${UPSTREAM_BASE}/${tag}/${entry.asset}`].filter(
-    (url): url is string => Boolean(url),
-  )
+  const candidates = downloadCandidates(lock, target, entry)
 
   let lastError = `no download source available for ${entry.asset}`
   for (const url of candidates) {
@@ -212,14 +237,55 @@ async function ensureArchive(tag: string, entry: TargetLock): Promise<string> {
   throw new Error(lastError)
 }
 
-async function inspect(file: string): Promise<{ bytes: number; sha256: string }> {
+export async function inspect(file: string): Promise<{ bytes: number; sha256: string }> {
   const bytes = new Uint8Array(await Bun.file(file).arrayBuffer())
   const hasher = new Bun.CryptoHasher("sha256")
   hasher.update(bytes)
   return { bytes: bytes.byteLength, sha256: hasher.digest("hex") }
 }
 
-async function extract(archive: string, asset: string, baseTarget: string): Promise<ExtractedFile[]> {
+export function serverExecutableName(asset: string): string {
+  return asset.endsWith(".zip") ? "llama-server.exe" : "llama-server"
+}
+
+export interface StagedRuntimeFiles {
+  readonly serverPath: string
+  readonly libsPath: string
+  readonly files: { name: string; bytes: number }[]
+}
+
+export async function stageExtractedToDir(
+  archive: string,
+  asset: string,
+  baseTarget: string,
+  destDir: string,
+): Promise<StagedRuntimeFiles> {
+  const executable = serverExecutableName(asset)
+  const extracted = await extract(archive, asset, baseTarget)
+  const binary = extracted.find((file) => file.name === executable)
+  if (!binary) throw new Error(`archive ${asset} does not contain ${executable}`)
+  const libraries = extracted.filter((file) => file.name !== executable)
+  rmSync(destDir, { recursive: true, force: true })
+  mkdirSync(destDir, { recursive: true })
+  const files: { name: string; bytes: number }[] = []
+  const serverPath = path.join(destDir, executable)
+  const serverBytes = await binary.read()
+  await Bun.write(serverPath, serverBytes)
+  files.push({ name: executable, bytes: serverBytes.byteLength })
+  for (const library of libraries) {
+    const destination = path.join(destDir, library.name)
+    const bytes = await library.read()
+    await Bun.write(destination, bytes)
+    files.push({ name: library.name, bytes: bytes.byteLength })
+  }
+  if (!asset.endsWith(".zip")) {
+    const result = await $`chmod +x ${serverPath}`.quiet().nothrow()
+    if (result.exitCode !== 0) throw new Error(`could not mark ${serverPath} executable`)
+  }
+  return { serverPath, libsPath: destDir, files }
+}
+
+export async function extract(archive: string, asset: string, baseTarget: string): Promise<ExtractedFile[]> {
   if (asset.endsWith(".zip")) return extractZip(archive)
   return extractTarGz(archive, baseTarget)
 }

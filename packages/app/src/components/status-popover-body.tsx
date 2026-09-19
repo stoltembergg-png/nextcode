@@ -36,6 +36,7 @@ import {
   semifBackendDisplayState,
   semifBackendDotClass,
   semifBackendMessageKey,
+  semifLifecycleStatusKey,
 } from "@/components/semif-backend-status"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
@@ -661,7 +662,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     <Match when={semifStatus()?.status === "downloading"}>
                       <div class="flex flex-col gap-1.5">
                         <div class="flex items-center justify-between gap-2 text-12-regular text-text-weak">
-                          <span>{language.t("semif.state.downloading")}</span>
+                          <span>{language.t(semifLifecycleStatusKey(semifStatus()) ?? "semif.state.downloading")}</span>
                           <Show when={semifProgressPercent() !== undefined}>
                             <span class="tabular-nums">
                               {language.t("semif.progress.percent", { percent: `${semifProgressPercent()}%` })}
@@ -688,7 +689,7 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                     <Match when={semifStatus()?.status === "verifying"}>
                       <div class="flex items-center gap-1.5 text-12-regular text-text-weak">
                         <div class="size-1.5 rounded-full shrink-0 bg-icon-warning-base" />
-                        {language.t("semif.state.verifying")}
+                        {language.t(semifLifecycleStatusKey(semifStatus()) ?? "semif.state.verifying")}
                       </div>
                     </Match>
                     <Match when={semifStatus()?.status === "starting"}>

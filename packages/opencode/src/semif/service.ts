@@ -17,6 +17,7 @@ import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { SemifAcquire } from "./acquire"
 import { SemifBackend, type BackendVariant } from "./backend"
+import { SemifHipRuntime } from "./hip-runtime"
 import { parseSemifOptions, type SemifMode } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
@@ -100,6 +101,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 const errorMessage = (cause: unknown): string => {
   if (cause instanceof SemifServiceError) return cause.reason
   if (cause instanceof SemifAcquire.AcquireError) return cause.reason
+  if (cause instanceof SemifHipRuntime.HipRuntimeError) return cause.reason
   if (cause instanceof SemifRuntime.RuntimeError) return cause.reason
   if (cause instanceof SemifSidecar.SidecarError) return cause.reason
   return cause instanceof Error ? cause.message : String(cause)
@@ -109,6 +111,8 @@ interface State {
   readonly status: SemifStatus
   readonly error?: string
   readonly handle?: SemifSidecar.Handle
+  readonly hipDownloadFailed?: boolean
+  readonly hipFetching?: boolean
 }
 
 const layer = Layer.effect(
@@ -156,9 +160,12 @@ const layer = Layer.effect(
         cacheSize: block?.cacheSize,
         host: block?.host,
       })
+      const current = yield* Ref.get(state)
       const backend = SemifBackend.inspect({
         requested: resolved.backend,
         serverPath: resolved.serverPath,
+        hipDownloadFailed: current.hipDownloadFailed,
+        hipFetching: current.hipFetching,
       })
       if (backend.message) {
         yield* backend.fallback
@@ -253,6 +260,51 @@ const layer = Layer.effect(
       return { ...base, status: "offline" as SemifStatus }
     })
 
+    const ensureHipRuntime = Effect.gen(function* () {
+      const loaded = yield* load
+      if (
+        !SemifHipRuntime.shouldFetch({
+          requested: loaded.resolved.backend,
+          serverPath: loaded.resolved.serverPath,
+        })
+      ) {
+        return
+      }
+      yield* Ref.update(state, (value) => ({
+        ...value,
+        status: "downloading" as SemifStatus,
+        error: undefined,
+        hipDownloadFailed: false,
+        hipFetching: true,
+      }))
+      const exit = yield* provideAcquire(
+        SemifHipRuntime.ensure({
+          policy: loaded.download,
+          requested: loaded.resolved.backend,
+          serverPath: loaded.resolved.serverPath,
+          onProgress: (progress) => {
+            live.progress = progress
+          },
+          onPhase: (phase) =>
+            Effect.runSync(Ref.update(state, (value) => ({ ...value, status: phase as SemifStatus }))),
+        }),
+      ).pipe(Effect.exit)
+      live.progress = undefined
+      yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus, hipFetching: false }))
+      if (Exit.isFailure(exit)) {
+        if (loaded.download === "auto") {
+          yield* Ref.update(state, (value) => ({ ...value, hipDownloadFailed: true }))
+        }
+        yield* Effect.logWarning("semif: HIP runtime download failed", { cause: exit.cause })
+        return
+      }
+      yield* Effect.logInfo("semif: HIP runtime staged", {
+        acquired: exit.value.acquired,
+        serverPath: exit.value.serverPath,
+        libsPath: exit.value.libsPath,
+      })
+    })
+
     const ensureModel = Effect.gen(function* () {
       const loaded = yield* load
       const entry = loaded.entry
@@ -286,11 +338,13 @@ const layer = Layer.effect(
       if (loaded.resolved.mode === "off") {
         return yield* new SemifServiceError({ reason: "semif: disabled (mode=off)" })
       }
-      if (!loaded.serverPath) {
+      yield* ensureHipRuntime
+      const refreshed = yield* load
+      if (!refreshed.serverPath) {
         return yield* new SemifServiceError({ reason: "semif: llama-server binary is not available" })
       }
       yield* ensureModel
-      if (!loaded.modelPath) {
+      if (!refreshed.modelPath) {
         return yield* new SemifServiceError({ reason: "semif: no model path resolved" })
       }
       yield* Ref.update(state, (value) => ({ ...value, status: "starting" as SemifStatus }))
@@ -298,25 +352,25 @@ const layer = Layer.effect(
       // only finds its backends next to the executable. Without a libs directory
       // (unbundled/dev) this is a passthrough to the resolved binary.
       const runtime = yield* SemifRuntime.materialize({
-        serverPath: loaded.serverPath,
-        libsPath: loaded.libsPath,
+        serverPath: refreshed.serverPath,
+        libsPath: refreshed.libsPath,
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.mapError((cause) => new SemifServiceError({ reason: errorMessage(cause) })),
       )
       const handle = yield* provideSidecar(
         SemifSidecar.ensure({
-          host: loaded.resolved.host,
-          port: loaded.resolved.port,
-          threads: loaded.resolved.threads,
-          contextSize: loaded.resolved.contextSize,
-          loadTimeoutMs: loaded.resolved.loadTimeoutMs,
+          host: refreshed.resolved.host,
+          port: refreshed.resolved.port,
+          threads: refreshed.resolved.threads,
+          contextSize: refreshed.resolved.contextSize,
+          loadTimeoutMs: refreshed.resolved.loadTimeoutMs,
           serverPath: runtime.serverPath,
-          modelPath: loaded.modelPath,
+          modelPath: refreshed.modelPath,
         }),
       ).pipe(Effect.mapError((cause) => new SemifServiceError({ reason: errorMessage(cause) })))
       yield* Effect.tryPromise({
-        try: () => SemifScoring.prepare({ url: handle.url }, loaded.entry?.family ?? "lfm2"),
+        try: () => SemifScoring.prepare({ url: handle.url }, refreshed.entry?.family ?? "lfm2"),
         catch: (cause) => new SemifServiceError({ reason: errorMessage(cause) }),
       })
       yield* Ref.set(state, { status: "ready" as SemifStatus, handle })
@@ -349,6 +403,7 @@ const layer = Layer.effect(
         ),
       acquire: () =>
         Effect.gen(function* () {
+          yield* ensureHipRuntime
           yield* ensureModel
           return yield* snapshot
         }).pipe(
