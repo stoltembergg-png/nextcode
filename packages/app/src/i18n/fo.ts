@@ -833,6 +833,18 @@ export const dict = {
   "semif.action.retry": "Retry",
   "semif.progress.percent": "{{percent}}",
   "semif.model.label": "Local model",
+
+  "semif.backend.label": "Compute backend",
+  "semif.backend.hip_active": "HIP/ROCm (AMD GPU)",
+  "semif.backend.system_runtime_missing": "ROCm/HIP system runtime missing (hipblas/rocblas)",
+  "semif.backend.fallback.unknown": "Using CPU backend",
+  "semif.backend.fallback.manual_cpu": "Using CPU (configured)",
+  "semif.backend.fallback.platform_unsupported": "Using CPU — HIP/ROCm not supported on this platform",
+  "semif.backend.fallback.mixed_gpus": "Using CPU — mixed AMD and NVIDIA GPUs; set backend explicitly",
+  "semif.backend.fallback.no_amd_gpu": "Using CPU — no AMD GPU detected",
+  "semif.backend.fallback.missing_rocm_runtime": "Using CPU — ROCm/HIP system runtime missing",
+  "semif.backend.fallback.no_vendored_binary": "Using CPU — HIP binary not included in this build",
+  "semif.backend.fallback.unsupported_variant": "Using CPU — requested backend not available",
   "session.share.popover.title": "Útgeva á netinum",
   "session.share.popover.description.shared":
     "Henda setan er almenn á netinum. Tað er atkomiligt fyri øll, sum hava leinkjuna.",

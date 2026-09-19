@@ -1662,9 +1662,14 @@ export type SemifDownload1 = "auto" | "manual" | "never"
 
 export type SemifDownload = SemifDownload1
 
+export type SemifBackend1 = "auto" | "cpu" | "cuda" | "hip" | "vulkan"
+
+export type SemifBackend = SemifBackend1
+
 export type SemifConfig = {
   mode?: SemifMode1
   download?: SemifDownload1
+  backend?: SemifBackend1
   threads?: number
   contextSize?: number
   nProbs?: number
@@ -2068,6 +2073,19 @@ export type SemifStatus = {
     | "offline"
   mode: SemifMode1
   download: SemifDownload1
+  backend: SemifBackend1
+  backendRequested: SemifBackend1
+  backendFallback: boolean
+  backendFallbackReason?:
+    | "manual_cpu"
+    | "platform_unsupported"
+    | "mixed_gpus"
+    | "no_amd_gpu"
+    | "missing_rocm_runtime"
+    | "no_vendored_binary"
+    | "unsupported_variant"
+  backendMessage?: string
+  systemRuntimeMissing: boolean
   model?: {
     id: string
     filename: string
@@ -2075,6 +2093,11 @@ export type SemifStatus = {
     bytes: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     quant: string
   }
+  choices: Array<{
+    id: string
+    label: string
+    quant: string
+  }>
   modelPath?: string
   serverPath?: string
   host: string
@@ -2086,11 +2109,6 @@ export type SemifStatus = {
     total?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   }
   error?: string
-  choices: Array<{
-    id: string
-    label: string
-    quant: string
-  }>
 }
 
 export type Model = {

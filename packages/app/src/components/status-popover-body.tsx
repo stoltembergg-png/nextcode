@@ -32,6 +32,11 @@ import { useSettings } from "@/context/settings"
 import { useMcpToggle } from "@/context/mcp"
 import { useQueryOptions } from "@/context/server-sync"
 import { useServerProtocol } from "@/context/server-sdk"
+import {
+  semifBackendDisplayState,
+  semifBackendDotClass,
+  semifBackendMessageKey,
+} from "@/components/semif-backend-status"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   const parts = value.split(file)
@@ -363,6 +368,8 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
     () => semifModelOptimistic() ?? semifStatus()?.model?.id ?? SEMIF_DEFAULT_MODEL,
   )
   const semifProgressPercent = createMemo(() => semifPercent(semifStatus()))
+  const semifBackendState = createMemo(() => semifBackendDisplayState(semifStatus()))
+  const semifBackendMessage = createMemo(() => semifBackendMessageKey(semifStatus()))
   const showSemifModeControl = () => semifStatus()?.status !== "unsupported"
   const semifChoices = createMemo(() => {
     const fromStatus = semifStatus()?.choices
@@ -737,6 +744,18 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
                       <span class="text-12-regular text-text-weak">{language.t("semif.state.disabled")}</span>
                     </Match>
                   </SwitchView>
+
+                  <Show when={semifBackendState() && semifBackendMessage()}>
+                    <div class="flex flex-col gap-0.5">
+                      <span class="text-12-regular text-text-weak">{language.t("semif.backend.label")}</span>
+                      <div class="flex items-center gap-1.5 text-12-regular text-text-base">
+                        <div
+                          class={`size-1.5 rounded-full shrink-0 ${semifBackendDotClass(semifBackendState())}`}
+                        />
+                        <span>{language.t(semifBackendMessage()!)}</span>
+                      </div>
+                    </div>
+                  </Show>
 
                   <div class="flex flex-col gap-1.5">
                     <span class="text-12-regular text-text-weak">{language.t("semif.model.label")}</span>
