@@ -74,7 +74,7 @@ jobs:
   # bytes and sha256 on the way in and is a no-op when the mirror already has it.
   mirror:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
     permissions:
       contents: write
     outputs:
@@ -96,54 +96,57 @@ jobs:
           LOCK="packages/opencode/script/semif-server.lock.json"
           echo "tag=$(jq -r '.tag' "$LOCK")" >> "$GITHUB_OUTPUT"
 
-      - name: Download and verify the llama.cpp archives
-        env:
-          PIN: ${{ steps.plan.outputs.tag }}
-        run: |
-          set -euo pipefail
-          MIRROR_TAG="semif-server-${PIN}"
-          LOCK="packages/opencode/script/semif-server.lock.json"
-          TARGETS=$(jq -r '.targets | keys[]' "$LOCK")
-          for TARGET in $TARGETS; do
-            ASSET=$(jq -r --arg t "$TARGET" '.targets[$t].asset' "$LOCK")
-            case "$ASSET" in
-              *.tar.gz) EXT=.tar.gz ;;
-              *) EXT=.zip ;;
-            esac
-            VARIANT=cpu
-            BASE="$TARGET"
-            case "$TARGET" in
-              *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
-            esac
-            export NEXTCODE_SEMIF_MIRROR="https://github.com/${{ github.repository }}/releases/download/${MIRROR_TAG}/semif-server-${PIN}-${TARGET}${EXT}"
-            bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only
-          done
-
-      - name: Publish the mirrored archives
+      - name: Sync mirror assets (skip when already published)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PIN: ${{ steps.plan.outputs.tag }}
         run: |
           set -euo pipefail
+          REPO="${{ github.repository }}"
           MIRROR_TAG="semif-server-${PIN}"
-          NOTES="Mirrored llama.cpp ${PIN} server binaries (upstream nightlies are ephemeral)."
-          if gh release view "$MIRROR_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release edit "$MIRROR_TAG" --repo "${{ github.repository }}" --notes "$NOTES" --prerelease
-          else
-            gh release create "$MIRROR_TAG" --repo "${{ github.repository }}" --title "$MIRROR_TAG" --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
-          fi
           LOCK="packages/opencode/script/semif-server.lock.json"
+          NOTES="Mirrored llama.cpp ${PIN} server binaries (upstream nightlies are ephemeral)."
+          if gh release view "$MIRROR_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$MIRROR_TAG" --repo "$REPO" --notes "$NOTES" --prerelease
+            EXISTING_ASSETS=$(gh api "repos/${REPO}/releases/tags/${MIRROR_TAG}" --jq '.assets')
+          else
+            gh release create "$MIRROR_TAG" --repo "$REPO" --title "$MIRROR_TAG" --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
+            EXISTING_ASSETS='[]'
+          fi
           TARGETS=$(jq -r '.targets | keys[]' "$LOCK")
+          SKIPPED=0
+          SYNCED=0
           for TARGET in $TARGETS; do
             ASSET=$(jq -r --arg t "$TARGET" '.targets[$t].asset' "$LOCK")
+            EXPECTED_BYTES=$(jq -r --arg t "$TARGET" '.targets[$t].bytes' "$LOCK")
             case "$ASSET" in
               *.tar.gz) EXT=.tar.gz ;;
               *) EXT=.zip ;;
             esac
             NAME="semif-server-${PIN}-${TARGET}${EXT}"
+            EXISTING_BYTES=$(jq -r --arg n "$NAME" '.[] | select(.name == $n) | .size' <<<"$EXISTING_ASSETS")
+            if [ -n "$EXISTING_BYTES" ] && [ "$EXISTING_BYTES" = "$EXPECTED_BYTES" ]; then
+              echo "skip: $NAME already mirrored ($EXISTING_BYTES bytes, lock sha256 verified on original publish)"
+              SKIPPED=$((SKIPPED + 1))
+              continue
+            fi
+            if [ -n "$EXISTING_BYTES" ]; then
+              echo "re-sync: $NAME size mismatch (release=$EXISTING_BYTES lock=$EXPECTED_BYTES)"
+            else
+              echo "sync: $NAME missing from $MIRROR_TAG"
+            fi
+            VARIANT=cpu
+            BASE="$TARGET"
+            case "$TARGET" in
+              *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
+            esac
+            export NEXTCODE_SEMIF_MIRROR="https://github.com/${REPO}/releases/download/${MIRROR_TAG}/${NAME}"
+            bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only
             cp "packages/desktop/src-tauri/.semif-cache/${ASSET}" "/tmp/${NAME}"
-            gh release upload "$MIRROR_TAG" "/tmp/${NAME}" --clobber --repo "${{ github.repository }}"
+            gh release upload "$MIRROR_TAG" "/tmp/${NAME}" --clobber --repo "$REPO"
+            SYNCED=$((SYNCED + 1))
           done
+          echo "mirror sync complete: skipped=$SKIPPED synced=$SYNCED"
 
   build:
     needs: [sidecar, mirror]
