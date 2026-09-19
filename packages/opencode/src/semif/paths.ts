@@ -14,7 +14,7 @@
 // directory is keyed by the launcher/libraries content so a new vendored build
 // gets a fresh directory and the old one can be garbage-collected.
 
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { HOST_TARGETS, stagedServerName } from "../../script/fetch-semif-server"
@@ -53,6 +53,14 @@ export function runtimeDir(key: string): string {
   return path.join(runtimeRoot(), key)
 }
 
+export function hipRuntimeDir(sha256: string): string {
+  return path.join(runtimeRoot(), `hip-${sha256.slice(0, 12)}`)
+}
+
+export function hipRuntimeMarkerPath(sha256: string): string {
+  return path.join(hipRuntimeDir(sha256), ".hip-runtime.json")
+}
+
 export function serverBinaryName(): string {
   return process.platform === "win32" ? "llama-server.exe" : "llama-server"
 }
@@ -84,7 +92,17 @@ export function resolveServerPath(input: ServerPathInput = {}): string | undefin
   const env = input.env ?? process.env
   const variant = input.variant ?? "cpu"
   const configured = readString(input.configPath) ?? readString(env[SERVER_ENV]) ?? readString(env[SERVER_ENV_FALLBACK])
-  if (configured) return serverPathForVariant(configured, variant)
+  if (configured) {
+    if (variant === "cpu") return configured
+    const derived = serverPathForVariant(configured, variant)
+    if (derived) return derived
+    if (variant === "hip") return resolveStagedHipServerPath(env)
+    return undefined
+  }
+  if (variant === "hip") {
+    const staged = resolveStagedHipServerPath(env)
+    if (staged) return staged
+  }
   const dev = input.devFallback ?? defaultDevServerPath(variant)
   if (dev && existsSync(dev)) return dev
   return undefined
@@ -131,8 +149,48 @@ export function resolveLibsPath(
   env: Record<string, string | undefined> = process.env,
   variant: BackendVariant = "cpu",
 ): string | undefined {
-  if (variant === "hip") return readString(env[LIBS_HIP_ENV])
+  if (variant === "hip") {
+    const configured = readString(env[LIBS_HIP_ENV])
+    if (configured) return configured
+    const staged = resolveStagedHipLibsPath(env)
+    if (staged) return staged
+    return undefined
+  }
   return readString(env[LIBS_ENV])
+}
+
+function resolveStagedHipServerPath(env: Record<string, string | undefined>): string | undefined {
+  const dir = readStagedHipRuntimeDir(env)
+  if (!dir) return undefined
+  const named = hostTargetOrUndefined()
+  if (named) {
+    const isZip = process.platform === "win32"
+    const staged = path.join(dir, stagedServerName(named, "hip", isZip))
+    if (existsSync(staged)) return staged
+  }
+  const binary = path.join(dir, serverBinaryName())
+  if (existsSync(binary)) return binary
+  return undefined
+}
+
+function resolveStagedHipLibsPath(env: Record<string, string | undefined>): string | undefined {
+  const dir = readStagedHipRuntimeDir(env)
+  if (!dir || !existsSync(dir)) return undefined
+  return dir
+}
+
+function readStagedHipRuntimeDir(_env: Record<string, string | undefined>): string | undefined {
+  const root = runtimeRoot()
+  if (!existsSync(root)) return undefined
+  for (const entry of readdirSync(root)) {
+    if (!entry.startsWith("hip-")) continue
+    const dir = path.join(root, entry)
+    const markerPath = path.join(dir, ".hip-runtime.json")
+    if (existsSync(markerPath)) return dir
+    const binary = path.join(dir, serverBinaryName())
+    if (existsSync(binary)) return dir
+  }
+  return undefined
 }
 
 function readString(value: string | undefined): string | undefined {

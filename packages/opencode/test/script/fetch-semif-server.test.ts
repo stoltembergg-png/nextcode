@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import {
+  downloadCandidates,
   HOST_TARGETS,
   hostTarget,
   lockTargetKey,
+  publishedMirrorUrl,
   stagedLibsDir,
   stagedServerName,
+  type Lockfile,
+  type TargetLock,
 } from "../../script/fetch-semif-server"
 
 describe("fetch-semif-server", () => {
@@ -30,5 +34,27 @@ describe("fetch-semif-server", () => {
   test("stages hip libraries in a separate resource directory", () => {
     expect(stagedLibsDir("cpu")).toMatch(/\/semif$/)
     expect(stagedLibsDir("hip")).toMatch(/\/semif-hip$/)
+  })
+
+  test("builds published mirror urls from the lock target", () => {
+    const lock: Lockfile = { tag: "b11040", targets: {} }
+    const entry: TargetLock = {
+      asset: "llama-b11040-bin-win-rocm-10.0-x64.zip",
+      bytes: 1,
+      sha256: "abc",
+    }
+    const target = "x86_64-pc-windows-msvc-hip"
+    expect(publishedMirrorUrl(lock, target, entry)).toBe(
+      "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-hip.zip",
+    )
+    expect(downloadCandidates(lock, target, entry)).toEqual([
+      "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-hip.zip",
+      "https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-rocm-10.0-x64.zip",
+    ])
+    expect(downloadCandidates(lock, target, entry, { NEXTCODE_SEMIF_MIRROR: "https://mirror/example.zip" })).toEqual([
+      "https://mirror/example.zip",
+      "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-hip.zip",
+      "https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-rocm-10.0-x64.zip",
+    ])
   })
 })

@@ -12,6 +12,8 @@ import {
   resolveLibsPath,
   resolveModelPath,
   resolveServerPath,
+  hipRuntimeDir,
+  hipRuntimeMarkerPath,
   runtimeDir,
   runtimeRoot,
 } from "../../src/semif/paths"
@@ -68,6 +70,10 @@ describe("semif paths", () => {
   test("runtime layout lives under data and is keyed by content", () => {
     expect(runtimeRoot()).toBe(path.join(Global.Path.data, "semif", "runtime"))
     expect(runtimeDir("abc123")).toBe(path.join(Global.Path.data, "semif", "runtime", "abc123"))
+    expect(hipRuntimeDir(HASH)).toBe(path.join(Global.Path.data, "semif", "runtime", `hip-${HASH.slice(0, 12)}`))
+    expect(hipRuntimeMarkerPath(HASH)).toBe(
+      path.join(Global.Path.data, "semif", "runtime", `hip-${HASH.slice(0, 12)}`, ".hip-runtime.json"),
+    )
   })
 
   test("libs path comes from the dedicated launcher env and ignores blanks", () => {
