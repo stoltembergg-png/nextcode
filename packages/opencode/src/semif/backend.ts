@@ -4,7 +4,7 @@
 // supported platforms; mixed AMD+NVIDIA hosts require an explicit backend. CPU
 // fallback is always visible in status and logs — never silent.
 
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 import { hostTarget } from "../../script/fetch-semif-server"
 import { SemifPaths } from "./paths"
@@ -85,20 +85,17 @@ function readLinuxGpuInventory(): GpuInventory {
 
 function readWindowsGpuInventory(): GpuInventory {
   const inventory = { amd: false, nvidia: false }
-  const roots = [
-    "C:\\Windows\\System32",
-    "C:\\Windows\\System32\\DriverStore\\FileRepository",
-    process.env["ProgramFiles"] ? path.join(process.env["ProgramFiles"], "AMD") : undefined,
-  ].filter((value): value is string => Boolean(value))
-  for (const root of roots) {
-    if (!existsSync(root)) continue
-    if (root.toLowerCase().includes("amd")) inventory.amd = true
-    for (const entry of readdirSync(root)) {
-      const lower = entry.toLowerCase()
-      if (lower.includes("amd") || lower.includes("amdkmdag") || lower.includes("amdhip64")) inventory.amd = true
-      if (lower.includes("nvidia") || lower.includes("nvcuda")) inventory.nvidia = true
+  const system32 = "C:\\Windows\\System32"
+  if (existsSync(path.join(system32, "nvcuda.dll"))) inventory.nvidia = true
+  if (existsSync(path.join(system32, "nvapi64.dll"))) inventory.nvidia = true
+  for (const name of ["amdkmdag.sys", "amdxc64.dll", "amdhip64_7.dll", "atidxx64.dll"]) {
+    if (existsSync(path.join(system32, name))) {
+      inventory.amd = true
+      break
     }
   }
+  const programFilesAmd = process.env["ProgramFiles"] ? path.join(process.env["ProgramFiles"], "AMD") : undefined
+  if (programFilesAmd && existsSync(programFilesAmd)) inventory.amd = true
   if (process.env.ROCM_PATH && existsSync(process.env.ROCM_PATH)) inventory.amd = true
   return inventory
 }

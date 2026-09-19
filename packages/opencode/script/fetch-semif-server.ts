@@ -138,7 +138,7 @@ export async function stageSemifServer(options: StageOptions = {}) {
     return { target, baseTarget, variant, stagedServer, libsDir, archive, skipped: false }
   }
 
-  const files = await extract(archive, entry.asset)
+  const files = await extract(archive, entry.asset, baseTarget)
   const binary = files.find((file) => file.name === executable)
   if (!binary) throw new Error(`archive ${entry.asset} does not contain ${executable}`)
 
@@ -219,9 +219,9 @@ async function inspect(file: string): Promise<{ bytes: number; sha256: string }>
   return { bytes: bytes.byteLength, sha256: hasher.digest("hex") }
 }
 
-async function extract(archive: string, asset: string): Promise<ExtractedFile[]> {
+async function extract(archive: string, asset: string, baseTarget: string): Promise<ExtractedFile[]> {
   if (asset.endsWith(".zip")) return extractZip(archive)
-  return extractTarGz(archive)
+  return extractTarGz(archive, baseTarget)
 }
 
 async function extractZip(archive: string): Promise<ExtractedFile[]> {
@@ -240,7 +240,7 @@ async function extractZip(archive: string): Promise<ExtractedFile[]> {
   return files
 }
 
-async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
+async function extractTarGz(archive: string, baseTarget: string): Promise<ExtractedFile[]> {
   const work = path.join(cacheDir, "extract")
   rmSync(work, { recursive: true, force: true })
   mkdirSync(work, { recursive: true })
@@ -252,7 +252,7 @@ async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
   const root = roots.length === 1 ? path.join(work, roots[0]) : work
   const files: ExtractedFile[] = []
   for (const name of readdirSync(root)) {
-    if (!neededLibrary(name)) continue
+    if (!neededLibrary(name, baseTarget)) continue
     const source = path.join(root, name)
     if (!statSync(source).isFile()) continue
     files.push({ name, read: async () => new Uint8Array(await Bun.file(source).arrayBuffer()) })
@@ -267,15 +267,12 @@ async function extractTarGz(archive: string): Promise<ExtractedFile[]> {
 /// (plus the unversioned server impl) is enough and avoids duplicating each
 /// library behind three names. Our staging dereferences the symlinks into real
 /// files, because the bundle copy does not preserve links.
-function neededLibrary(name: string): boolean {
+function neededLibrary(name: string, baseTarget: string): boolean {
   if (name === "llama-server") return true
-  if (process.platform === "darwin") {
+  if (baseTarget.includes("darwin")) {
     return name === "libllama-server-impl.dylib" || name.endsWith(".0.dylib")
   }
-  if (process.platform === "linux") {
-    return name.endsWith(".so") || /\.so\.\d+$/.test(name)
-  }
-  return false
+  return name.endsWith(".so") || /\.so\.\d+$/.test(name)
 }
 
 function parseArgs(argv: string[]): StageOptions {
