@@ -795,7 +795,9 @@ export const dict = {
   "semif.state.ready": "Pronto para decisões",
   "semif.state.not_downloaded": "O modelo ainda não foi baixado",
   "semif.state.downloading": "Baixando modelo",
+  "semif.state.downloading_hip_runtime": "Baixando runtime HIP",
   "semif.state.verifying": "Verificando integridade",
+  "semif.state.verifying_hip_runtime": "Verificando runtime HIP",
   "semif.state.starting": "Carregando modelo local",
   "semif.state.failed": "Falha ao preparar o modelo",
   "semif.state.offline": "É necessária uma conexão",
@@ -808,6 +810,8 @@ export const dict = {
 
   "semif.backend.label": "Backend de computação",
   "semif.backend.hip_active": "HIP/ROCm (GPU AMD)",
+  "semif.backend.hip_downloading": "Baixando runtime HIP",
+  "semif.backend.hip_verifying": "Verificando runtime HIP",
   "semif.backend.system_runtime_missing": "Runtime ROCm/HIP do sistema ausente (hipblas/rocblas)",
   "semif.backend.fallback.unknown": "Usando CPU",
   "semif.backend.fallback.manual_cpu": "Usando CPU (configurado)",
