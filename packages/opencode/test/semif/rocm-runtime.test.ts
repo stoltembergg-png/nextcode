@@ -9,7 +9,8 @@ import { Global } from "@opencode-ai/core/global"
 import { embeddedRocmLock, runtimeStageKey, stageWheelsToDir } from "../../script/fetch-rocm-runtime"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 import { resolveBackend } from "../../src/semif/backend"
-import { GFX_ENV } from "../../src/semif/gfx"
+import { GFX_ENV, unsupportedGfx } from "../../src/semif/gfx"
+import { shouldFetch as shouldFetchHip } from "../../src/semif/hip-runtime"
 import { ensure, shouldFetch } from "../../src/semif/rocm-runtime"
 import { hipRuntimeDir, rocmRuntimeDir, SERVER_ENV } from "../../src/semif/paths"
 import { readHipLock } from "../../src/semif/hip-runtime"
@@ -157,6 +158,18 @@ describe("semif rocm runtime", () => {
       expect(status.fallbackReason).not.toBe("missing_rocm_runtime")
       expect(status.message).toContain("not staged")
     })
+  })
+
+  test("gfx803 short-circuits before any ROCm wheel fetch", () => {
+    if (process.platform !== "win32") return
+    const triple = hostTarget()
+    const cpu = path.join("/bundle", stagedServerName(triple, "cpu", true))
+    const env = { [GFX_ENV]: "gfx803" }
+    expect(unsupportedGfx(env)).toBe("gfx803")
+    expect(shouldFetch({ requested: "hip", serverPath: cpu, env, inventory: { amd: true, nvidia: false } })).toBe(false)
+    expect(shouldFetchHip({ requested: "hip", serverPath: cpu, env, inventory: { amd: true, nvidia: false } })).toBe(
+      false,
+    )
   })
 
   test("download failure maps to hip_download_failed", async () => {

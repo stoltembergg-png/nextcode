@@ -16,8 +16,9 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { SemifAcquire } from "./acquire"
-import { SemifBackend, type BackendVariant } from "./backend"
+import { amdGpuUnsupportedForWinHip, SemifBackend, readGpuInventory, type BackendVariant } from "./backend"
 import { SemifHipRuntime } from "./hip-runtime"
+import { unsupportedGfx } from "./gfx"
 import { SemifRocmRuntime } from "./rocm-runtime"
 import { parseSemifOptions, type SemifMode } from "./config"
 import { SemifManifest } from "./manifest"
@@ -271,6 +272,9 @@ const layer = Layer.effect(
 
     const ensureRocmRuntime = Effect.gen(function* () {
       const loaded = yield* load
+      if (SemifRocmRuntime.rocmVendorSupported() && unsupportedGfx()) {
+        return undefined
+      }
       if (
         !SemifRocmRuntime.shouldFetch({
           requested: loaded.resolved.backend,
@@ -317,6 +321,9 @@ const layer = Layer.effect(
 
     const ensureHipRuntime = Effect.gen(function* () {
       const loaded = yield* load
+      if (SemifRocmRuntime.rocmVendorSupported() && unsupportedGfx()) {
+        return
+      }
       if (
         !SemifHipRuntime.shouldFetch({
           requested: loaded.resolved.backend,

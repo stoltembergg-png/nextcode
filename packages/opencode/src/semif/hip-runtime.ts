@@ -24,6 +24,7 @@ import {
   vendoredBinaryExists,
   type BackendPreference,
 } from "./backend"
+import { unsupportedGfx } from "./gfx"
 import { SemifPaths } from "./paths"
 
 const MARKER_NAME = ".hip-runtime.json"
@@ -102,6 +103,7 @@ export function shouldFetch(input: {
   if (input.requested === "hip" && !inventory.amd) return false
   if (amdGpuUnsupportedForWinHip(inventory)) return false
   const env = input.env ?? process.env
+  if (unsupportedGfx(env)) return false
   return !vendoredBinaryExists("hip", input.serverPath, env)
 }
 
