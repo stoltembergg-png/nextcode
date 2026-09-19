@@ -272,7 +272,8 @@ const layer = Layer.effect(
 
     const ensureRocmRuntime = Effect.gen(function* () {
       const loaded = yield* load
-      if (SemifRocmRuntime.rocmVendorSupported() && unsupportedGfx()) {
+      const inventory = readGpuInventory()
+      if (amdGpuUnsupportedForWinHip(inventory) || unsupportedGfx()) {
         return undefined
       }
       if (
@@ -321,7 +322,8 @@ const layer = Layer.effect(
 
     const ensureHipRuntime = Effect.gen(function* () {
       const loaded = yield* load
-      if (SemifRocmRuntime.rocmVendorSupported() && unsupportedGfx()) {
+      const inventory = readGpuInventory()
+      if (amdGpuUnsupportedForWinHip(inventory) || unsupportedGfx()) {
         return
       }
       if (
