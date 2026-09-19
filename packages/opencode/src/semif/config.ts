@@ -1,10 +1,12 @@
 import { stat } from "node:fs/promises"
 import { availableParallelism } from "node:os"
+import type { BackendPreference } from "./backend"
 
 export type SemifMode = "auto" | "lazy" | "off"
 
 export type SemifOptions = {
   mode?: string
+  backend?: string
   modelPath?: string
   serverPath?: string
   port?: number
@@ -18,6 +20,7 @@ export type SemifOptions = {
 
 export type SemifResolved = {
   mode: SemifMode
+  backend: BackendPreference
   host: string
   port: number
   threads: number
@@ -38,6 +41,7 @@ export type SemifPathStatus = {
 
 const DEFAULTS = {
   mode: "auto" as SemifMode,
+  backend: "auto" as BackendPreference,
   host: "127.0.0.1",
   port: 8817,
   contextSize: 2048,
@@ -87,6 +91,19 @@ export function parseSemifOptions(raw?: unknown): SemifResolved {
     throw new Error(`semif: mode must be "auto", "lazy" or "off" (got "${modeRaw}")`)
   }
 
+  const backendRaw = (
+    readString(options.backend) ?? readString(env.SEMIF_BACKEND) ?? DEFAULTS.backend
+  ).toLowerCase()
+  if (
+    backendRaw !== "auto" &&
+    backendRaw !== "cpu" &&
+    backendRaw !== "cuda" &&
+    backendRaw !== "hip" &&
+    backendRaw !== "vulkan"
+  ) {
+    throw new Error(`semif: backend must be "auto", "cpu", "cuda", "hip" or "vulkan" (got "${backendRaw}")`)
+  }
+
   // Paths are supplied by options, env, or (in later phases) acquisition/packaging.
   // There are deliberately no author-machine fallbacks here; existence is checked by assertSemifPaths.
   const modelPath = readString(options.modelPath) ?? readString(env.SEMIF_MODEL_PATH)
@@ -126,6 +143,7 @@ export function parseSemifOptions(raw?: unknown): SemifResolved {
 
   return {
     mode: modeRaw,
+    backend: backendRaw,
     host,
     port,
     threads,

@@ -15,6 +15,12 @@ export const Download = Schema.Literals(["auto", "manual", "never"]).annotate({
 })
 export type Download = Schema.Schema.Type<typeof Download>
 
+export const Backend = Schema.Literals(["auto", "cpu", "cuda", "hip", "vulkan"]).annotate({
+  identifier: "SemifBackend",
+  description: "Exclusive llama-server backend variant (auto picks one on supported platforms)",
+})
+export type Backend = Schema.Schema.Type<typeof Backend>
+
 export const Info = Schema.Struct({
   mode: Mode.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))).annotate({
     description:
@@ -23,6 +29,10 @@ export const Info = Schema.Struct({
   download: Download.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))).annotate({
     description:
       "How to obtain the model and server: 'auto' downloads in the background on first run, 'manual' only on explicit user action, 'never' never downloads (default: auto)",
+  }),
+  backend: Backend.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))).annotate({
+    description:
+      "Exclusive llama-server backend: 'auto', 'cpu', 'cuda', 'hip', or 'vulkan'. HIP/ROCm is supported on Windows x64 and Ubuntu x64 only (default: auto)",
   }),
   threads: Schema.optional(PositiveInt).annotate({
     description: "Threads for the local model server. Defaults to the machine's available parallelism.",
