@@ -93,7 +93,8 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
-          echo "tag=$(bun -e "console.log(require('./packages/opencode/script/semif-server.lock.json').tag)")" >> "$GITHUB_OUTPUT"
+          LOCK="packages/opencode/script/semif-server.lock.json"
+          echo "tag=$(jq -r '.tag' "$LOCK")" >> "$GITHUB_OUTPUT"
 
       - name: Download and verify the llama.cpp archives
         env:
@@ -102,9 +103,9 @@ jobs:
           set -euo pipefail
           MIRROR_TAG="semif-server-${PIN}"
           LOCK="packages/opencode/script/semif-server.lock.json"
-          TARGETS=$(bun -e "console.log(Object.keys(require('./${LOCK}').targets).join(' '))")
+          TARGETS=$(jq -r '.targets | keys[]' "$LOCK")
           for TARGET in $TARGETS; do
-            ASSET=$(bun -e "console.log(require('./${LOCK}').targets['${TARGET}'].asset)")
+            ASSET=$(jq -r --arg t "$TARGET" '.targets[$t].asset' "$LOCK")
             case "$ASSET" in
               *.tar.gz) EXT=.tar.gz ;;
               *) EXT=.zip ;;
@@ -132,9 +133,9 @@ jobs:
             gh release create "$MIRROR_TAG" --repo "${{ github.repository }}" --title "$MIRROR_TAG" --notes "$NOTES" --target "$GITHUB_SHA" --prerelease
           fi
           LOCK="packages/opencode/script/semif-server.lock.json"
-          TARGETS=$(bun -e "console.log(Object.keys(require('./${LOCK}').targets).join(' '))")
+          TARGETS=$(jq -r '.targets | keys[]' "$LOCK")
           for TARGET in $TARGETS; do
-            ASSET=$(bun -e "console.log(require('./${LOCK}').targets['${TARGET}'].asset)")
+            ASSET=$(jq -r --arg t "$TARGET" '.targets[$t].asset' "$LOCK")
             case "$ASSET" in
               *.tar.gz) EXT=.tar.gz ;;
               *) EXT=.zip ;;
