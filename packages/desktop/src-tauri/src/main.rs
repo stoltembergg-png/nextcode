@@ -194,10 +194,20 @@ fn semif_sidecar_env(app: &AppHandle) -> Option<Vec<(&'static str, String)>> {
 /// Spawns the bundled opencode server as a sidecar and waits until it is healthy.
 /// Runs on a dedicated thread so the window can paint the loading state immediately.
 fn start_sidecar(app: &AppHandle) {
+    // CI smoke tests opt into stable credentials so the runner can authenticate
+    // against the dynamically allocated endpoint. Local runs keep a random
+    // password unless both values are explicitly provided.
+    let credentials = match (
+        std::env::var("NEXTCODE_SMOKE_USERNAME"),
+        std::env::var("NEXTCODE_SMOKE_PASSWORD"),
+    ) {
+        (Ok(username), Ok(password)) if !username.is_empty() && !password.is_empty() => (username, password),
+        _ => ("opencode".to_string(), uuid::Uuid::new_v4().to_string()),
+    };
     let endpoint = Endpoint {
         port: 0,
-        username: "opencode".to_string(),
-        password: uuid::Uuid::new_v4().to_string(),
+        username: credentials.0,
+        password: credentials.1,
     };
     let port = match free_port() {
         Ok(port) => port,
