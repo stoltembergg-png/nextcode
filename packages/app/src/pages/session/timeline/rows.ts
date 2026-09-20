@@ -269,11 +269,14 @@ export namespace Timeline {
     assistantMessages: AssistantMessage[],
   ) {
     const assistantMessageIDs = new Set(assistantMessages.map((message) => message.id))
+    const userMessageCreatedAt = userMessage.time.created
     return routingActivities.reduce<OmoRoutingEvent.OmoRoutingActivity | undefined>((latest, activity) => {
       if (activity.sessionID !== userMessage.sessionID || activity.state.phase === "cleared") return latest
+      const exact = assistantMessageIDs.has(activity.assistantMessageID)
+      if (!exact && (typeof userMessageCreatedAt !== "number" || activity.startedAt < userMessageCreatedAt)) return latest
       if (!latest || activity.updatedAt > latest.updatedAt) return activity
       if (activity.updatedAt < latest.updatedAt) return latest
-      return assistantMessageIDs.has(activity.assistantMessageID) ? activity : latest
+      return exact ? activity : latest
     }, undefined)
   }
 

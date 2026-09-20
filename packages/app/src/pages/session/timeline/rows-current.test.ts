@@ -69,13 +69,13 @@ describe("current session timeline rows", () => {
     ] satisfies SessionMessageInfo[]
     const normalized = normalizeSessionMessages("ses_1", source)
     const messages = new Map(normalized.messages.map((message) => [message.id, message]))
-    const activity = (updatedAt: number, assistantMessageID: string, toolCallID: string) =>
+    const activity = (startedAt: number, updatedAt: number, assistantMessageID: string, toolCallID: string) =>
       ({
         sessionID: "ses_1",
         assistantMessageID,
         toolCallID,
         sequence: 0,
-        startedAt: 0,
+        startedAt,
         updatedAt,
         state: { phase: "analyzing" },
       }) as OmoRoutingEvent.OmoRoutingActivity
@@ -88,7 +88,11 @@ describe("current session timeline rows", () => {
       "busy",
       true,
       normalized.messages.filter((message) => message.role === "user"),
-      [activity(1, "msg_assistant_old", "call_old"), activity(2, "msg_assistant_new", "call_new")],
+      [
+        activity(2, 1, "msg_assistant_old", "call_old"),
+        activity(0, 3, "msg_unrelated", "call_unrelated"),
+        activity(3, 2, "msg_assistant_new", "call_new"),
+      ],
     )
 
     const thinking = result.rows.find((row) => row._tag === "Thinking")
