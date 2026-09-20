@@ -57,6 +57,10 @@ export function hipRuntimeDir(sha256: string): string {
   return path.join(runtimeRoot(), `hip-${sha256.slice(0, 12)}`)
 }
 
+export function rocmRuntimeDir(key: string): string {
+  return path.join(runtimeRoot(), key)
+}
+
 export function hipRuntimeMarkerPath(sha256: string): string {
   return path.join(hipRuntimeDir(sha256), ".hip-runtime.json")
 }

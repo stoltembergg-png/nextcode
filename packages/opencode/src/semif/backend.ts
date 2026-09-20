@@ -6,7 +6,10 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
+import { embeddedRocmLock, rocmRuntimeComplete, runtimeStageKey } from "../../script/fetch-rocm-runtime"
 import { hostTarget } from "../../script/fetch-semif-server"
+import { resolveSupportedGfx, unsupportedGfx } from "./gfx"
+import { rocmVendorSupported } from "./rocm-runtime"
 import { SemifPaths } from "./paths"
 
 export type BackendVariant = "cpu" | "cuda" | "hip" | "vulkan"
@@ -50,6 +53,7 @@ export interface ResolveInput {
   readonly rocmRuntimePresent?: boolean
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
+  readonly rocmFetching?: boolean
 }
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
@@ -294,7 +298,15 @@ export function rocmRuntimePresent(
   env: Record<string, string | undefined> = process.env,
   platform = process.platform,
 ): boolean {
+  if (rocmVendorSupported(platform) && stagedRocmRuntimePresent(env)) return true
   return rocmRuntimePresentAt(rocmRuntimeSearchPaths(env, platform), platform)
+}
+
+export function stagedRocmRuntimePresent(env: Record<string, string | undefined> = process.env): boolean {
+  const gfx = resolveSupportedGfx(env)
+  if (!gfx) return false
+  const dir = SemifPaths.rocmRuntimeDir(runtimeStageKey(embeddedRocmLock(), gfx))
+  return rocmRuntimeComplete(dir)
 }
 
 export function vendoredBinaryExists(
@@ -332,6 +344,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
       rocmPresent,
       hipDownloadFailed: input.hipDownloadFailed,
       hipFetching: input.hipFetching,
+      rocmFetching: input.rocmFetching,
     })
   }
 
@@ -365,6 +378,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
     rocmPresent,
     hipDownloadFailed: input.hipDownloadFailed,
     hipFetching: input.hipFetching,
+    rocmFetching: input.rocmFetching,
   })
 }
 
@@ -376,6 +390,7 @@ function resolveHip(input: {
   readonly rocmPresent: boolean
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
+  readonly rocmFetching?: boolean
 }): BackendStatus {
   if (!hipPlatformSupported()) {
     return fallbackCpu(
@@ -395,6 +410,16 @@ function resolveHip(input: {
       input.requested,
       "gpu_unsupported",
       `semif: AMD GPU ${input.inventory.amdGfx} is outside the supported Windows HIP matrix (e.g. Polaris/RX 580); using CPU backend`,
+      input.inventory,
+    )
+  }
+
+  const blockedGfx = unsupportedGfx(input.env)
+  if (blockedGfx) {
+    return fallbackCpu(
+      input.requested,
+      "gpu_unsupported",
+      `semif: AMD GPU gfx ${blockedGfx} is not supported by the vendored HIP/ROCm runtime; using CPU backend`,
       input.inventory,
     )
   }
@@ -429,6 +454,28 @@ function resolveHip(input: {
   }
 
   if (!input.rocmPresent) {
+    if (input.rocmFetching || input.hipFetching) {
+      return {
+        requested: input.requested,
+        active: "cpu",
+        fallback: false,
+        systemRuntimeMissing: false,
+        amdGpu: input.inventory.amd,
+        nvidiaGpu: input.inventory.nvidia,
+        message: input.rocmFetching ? "semif: fetching ROCm runtime" : "semif: fetching HIP runtime",
+      }
+    }
+    if (rocmVendorSupported() && resolveSupportedGfx(input.env)) {
+      return {
+        requested: input.requested,
+        active: "cpu",
+        fallback: false,
+        systemRuntimeMissing: true,
+        amdGpu: input.inventory.amd,
+        nvidiaGpu: input.inventory.nvidia,
+        message: "semif: ROCm runtime is not staged yet",
+      }
+    }
     return fallbackCpu(
       input.requested,
       "missing_rocm_runtime",

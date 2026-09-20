@@ -39,6 +39,7 @@ export interface RuntimeEntry {
 export interface MaterializeInput {
   readonly serverPath: string
   readonly libsPath?: string
+  readonly rocmPath?: string
   // Overrides the `<data>/semif/runtime` root; tests use a scratch directory.
   readonly root?: string
 }
@@ -127,15 +128,59 @@ const place = (
     if (process.platform !== "win32") yield* fs.chmod(dest, 0o755).pipe(Effect.orElseSucceed(() => undefined))
   })
 
+const rocmEntries = (
+  fs: FileSystem.FileSystem,
+  rocmPath: string,
+): Effect.Effect<ReadonlyArray<{ source: string; target: string; bytes: number }>, never> =>
+  Effect.gen(function* () {
+    const binDir = path.join(rocmPath, "bin")
+    const binInfo = yield* fs.stat(binDir).pipe(Effect.orElseSucceed(() => undefined))
+    if (binInfo?.type !== "Directory") return []
+    const entries: { source: string; target: string; bytes: number }[] = []
+    for (const file of yield* directoryEntries(fs, binDir)) {
+      entries.push({
+        source: path.join(binDir, file.name),
+        target: file.name,
+        bytes: file.bytes,
+      })
+    }
+    for (const tree of ["rocblas", "hipblaslt"] as const) {
+      const root = path.join(rocmPath, tree)
+      const rootInfo = yield* fs.stat(root).pipe(Effect.orElseSucceed(() => undefined))
+      if (rootInfo?.type !== "Directory") continue
+      const walk = (dir: string, prefix: string): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          for (const name of yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as string[]))) {
+            const full = path.join(dir, name)
+            const relative = prefix ? `${prefix}/${name}` : name
+            const info = yield* fs.stat(full).pipe(Effect.orElseSucceed(() => undefined))
+            if (!info) continue
+            if (info.type === "Directory") {
+              yield* walk(full, relative)
+              continue
+            }
+            if (info.type !== "File") continue
+            entries.push({ source: full, target: relative.replaceAll("\\", "/"), bytes: Number(info.size) })
+          }
+        })
+      yield* walk(root, tree)
+    }
+    return entries
+  })
+
 export const materialize = Effect.fn("SemifRuntime.materialize")(function* (input: MaterializeInput) {
   const fs = yield* FileSystem.FileSystem
   const serverName = path.basename(input.serverPath)
 
-  if (!input.libsPath) return passthrough(input.serverPath)
-  const libsInfo = yield* fs.stat(input.libsPath).pipe(Effect.orElseSucceed(() => undefined))
-  if (libsInfo?.type !== "Directory") return passthrough(input.serverPath)
-  const libs = yield* directoryEntries(fs, input.libsPath)
-  if (libs.length === 0) return passthrough(input.serverPath)
+  const libs: RuntimeEntry[] = []
+  if (input.libsPath) {
+    const libsInfo = yield* fs.stat(input.libsPath).pipe(Effect.orElseSucceed(() => undefined))
+    if (libsInfo?.type === "Directory") {
+      libs.push(...(yield* directoryEntries(fs, input.libsPath)))
+    }
+  }
+  const rocm = input.rocmPath ? yield* rocmEntries(fs, input.rocmPath) : []
+  if (libs.length === 0 && rocm.length === 0) return passthrough(input.serverPath)
 
   const serverInfo = yield* fs.stat(input.serverPath).pipe(
     Effect.mapError(
@@ -143,14 +188,15 @@ export const materialize = Effect.fn("SemifRuntime.materialize")(function* (inpu
     ),
   )
   const server: RuntimeEntry = { name: serverName, bytes: Number(serverInfo.size) }
-  const key = runtimeKey(server, libs)
+  const rocmTargets = rocm.map((entry) => ({ name: entry.target, bytes: entry.bytes }))
+  const key = runtimeKey(server, [...libs, ...rocmTargets])
   const dir = input.root ? path.join(input.root, key) : SemifPaths.runtimeDir(key)
   const target = path.join(dir, serverName)
   const markerPath = path.join(dir, MARKER_NAME)
 
   const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""))
   const decoded = decodeMarker(marker)
-  const entries = [server, ...libs]
+  const entries = [server, ...libs, ...rocmTargets]
   if (
     Option.isSome(decoded) &&
     decoded.value.version === MARKER_VERSION &&
@@ -164,8 +210,13 @@ export const materialize = Effect.fn("SemifRuntime.materialize")(function* (inpu
     Effect.mapError((cause) => new RuntimeError({ reason: `semif: cannot create runtime dir ${dir}: ${cause.message}` })),
   )
   yield* place(fs, input.serverPath, target, server.bytes)
-  for (const lib of libs) {
-    yield* place(fs, path.join(input.libsPath, lib.name), path.join(dir, lib.name), lib.bytes)
+  if (input.libsPath) {
+    for (const lib of libs) {
+      yield* place(fs, path.join(input.libsPath, lib.name), path.join(dir, lib.name), lib.bytes)
+    }
+  }
+  for (const entry of rocm) {
+    yield* place(fs, entry.source, path.join(dir, entry.target), entry.bytes)
   }
   const next = { version: MARKER_VERSION, key, files: entries }
   yield* fs.writeFileString(markerPath, `${JSON.stringify(next, null, 2)}\n`).pipe(
