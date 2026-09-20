@@ -971,6 +971,17 @@ describe("server session", () => {
     expect(store.data.part[message.id]).toEqual([part])
   })
 
+  test("clears orphan parts when a session is aborted", () => {
+    const message = userMessage("message")
+    const part = textPart(message.id, { text: "live" })
+    const store = setup({ child: session("child") }).store
+
+    store.apply({ type: "message.part.updated", properties: { sessionID: "child", part, time: 2 } })
+    store.apply({ type: "session.aborted", properties: { sessionID: "child" } })
+
+    expect(store.data.part[message.id]).toBeUndefined()
+  })
+
   test("clears stale parts when the initial page has none", async () => {
     const pending = deferredResponse()
     const message = userMessage("message")
@@ -984,6 +995,19 @@ describe("server session", () => {
     await loading
 
     expect(store.data.part[message.id]).toBeUndefined()
+  })
+
+  test("does not delete parts written by a normal sync", async () => {
+    const message = userMessage("message")
+    const fresh = textPart(message.id, { text: "fresh" })
+    const store = createServerSession(
+      messageClient(response([{ info: message, parts: [] }]), response([{ info: message, parts: [fresh] }])),
+    )
+
+    await store.sync("child")
+    await store.sync("child", { force: true })
+
+    expect(store.data.part[message.id]).toEqual([fresh])
   })
 
   test("clears delta buffers for parts omitted by the initial page", async () => {
