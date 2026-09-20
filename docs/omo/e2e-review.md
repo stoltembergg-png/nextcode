@@ -39,9 +39,9 @@ story enables that setting, and no arbitrary wait occurs in an OMO spec.
 There were no `waitForTimeout`, `.first()`, `.nth()`, or inflated timeout
 matches in the OMO stories.
 
-The two stories passed six times each in the existing repeated run (three
-repetitions of both stories), including the exact child navigation and
-conflict-state assertions.
+The two stories passed ten times each in the repeated run (ten repetitions of
+both stories), including the exact child navigation and conflict-state
+assertions.
 
 ## Architectural review focus
 
@@ -51,7 +51,7 @@ conflict-state assertions.
 | SemIf non-ready fallback is immediate and deterministic | pass | `packages/opencode/src/omo/router.ts` selects the deterministic strategy when SemIf is unavailable; `packages/opencode/test/omo/router.test.ts` covers unavailable, timeout, cancellation, malformed, missing-slot, and ineligible answers. |
 | V2 durable prompt admission without a `SessionRunner` bridge | pass | `packages/opencode/src/omo/delegation.ts` calls `SessionV2.prompt(..., { resume: false })` and resumes through the V2 execution service; no `SessionRunner` import exists under `packages/opencode/src/omo`. |
 | Migration backup and exact plugin removal | pass | `packages/opencode/src/omo/migrate.ts` creates an exact-byte backup before atomic replacement and removes only the exact `oh-my-opencode-slim` entry; migration tests cover similar paths and refusal cases. |
-| Repeated E2E stability | pass | Both OMO stories passed 6/6 across three repetitions with isolated fixtures and no order dependence. |
+| Repeated E2E stability | pass | Both OMO stories passed 20/20 across ten repetitions with isolated fixtures and no order dependence. |
 
 ## Security and privacy scan
 

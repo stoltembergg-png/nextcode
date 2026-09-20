@@ -39,7 +39,7 @@ are clean.
 | App unit/browser coverage | `packages/app: bun run test:unit`; `packages/app: bun run test:browser` | Affected OMO status/reducer coverage is 8/8; the recorded browser run passed. |
 | App typecheck | `packages/app: bun run typecheck` | Pass. |
 | App E2E typecheck | `packages/app: bun run typecheck:e2e` | Pass. |
-| OMO Playwright stories | `packages/app: bun x playwright test e2e/user-story/omo-routing-flow.spec.ts e2e/user-story/omo-conflict.spec.ts --reporter=line --repeat-each=3` | 6/6 story runs across three repetitions, with isolated fixtures, exact child identity, conflict guidance, and no arbitrary waits. See [e2e-review.md](e2e-review.md). |
+| OMO Playwright stories | `packages/app: bun x playwright test e2e/user-story/omo-routing-flow.spec.ts e2e/user-story/omo-conflict.spec.ts --reporter=line --repeat-each=10` | 20/20 story runs across ten repetitions, with isolated fixtures, exact child identity, conflict guidance, and no arbitrary waits. See [e2e-review.md](e2e-review.md). |
 | Desktop types | `packages/desktop: bun run typecheck` | Pass. |
 | Desktop renderer | `packages/desktop: bun run build:renderer-tauri` | Pass. |
 | Desktop tests | `packages/desktop: bun test` | Known environment failure while loading `node:sqlite`; this remains a baseline/runtime limitation. |
@@ -85,8 +85,9 @@ repository root: bun ./packages/sdk/js/script/build.ts
 repository root: git diff --exit-code -- packages/client/src/generated packages/client/src/generated-effect packages/sdk/openapi.json packages/sdk/js/src/gen packages/sdk/js/src/v2/gen
 ```
 
-The client check and generated-artifact diff were clean after the API work. The
-final Task 16 changes are documentation-only and do not alter generated output.
+The client check, legacy SDK generator, and generated-artifact diff were clean
+after the API work. The final Task 16 changes are documentation-only and do not
+alter generated output.
 
 The final documentation check is:
 
