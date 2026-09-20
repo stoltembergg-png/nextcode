@@ -1177,6 +1177,7 @@ export function createServerSession(
             deleteMessageParts(draft, props.messageID)
           }),
         )
+        untrackOrphan(props.sessionID, [props.messageID])
         return
       }
       case "message.part.updated": {
