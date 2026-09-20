@@ -44,12 +44,16 @@ are clean.
 | Desktop renderer | `packages/desktop: bun run build:renderer-tauri` | Pass. |
 | Desktop tests | `packages/desktop: bun test` | Known environment failure while loading `node:sqlite`; this remains a baseline/runtime limitation. |
 | Windows Tauri shell smoke | `packages/desktop: bun run predev:tauri`; `cargo build --manifest-path src-tauri/Cargo.toml`; isolated `bun run smoke:omo` shell probe | Pass: the packaged sidecar started through the compiled desktop shell, V2 services completed, OMO status reported `enabled`, the SemIf mode was `off` for the controlled smoke, and `/instance/dispose` plus shell shutdown completed with exit code 0. |
+| macOS Tauri shell smoke | GitHub Actions `tauri-shell-macos.yml`, workflow dispatch on `native-omo` | Pass: run [35513839709](https://github.com/stoltembergg-png/nextcode/actions/runs/35513839709) completed in 5m31s; sidecar/runtime staging, renderer and Rust shell build, isolated OMO smoke, native menu/i18n/store assertions, and disposal/shutdown all passed. |
 | Controlled packaged smoke | `packages/opencode: bun run src/index.ts --pure debug omo-smoke --json` with SemIf disabled and isolated config/data/state directories | Pass on Windows: native agents discovered, foreground and background V2 services completed, active jobs returned to zero, and disposal evidence was true. No real-model download occurred. |
 | Real-model SemIf probe | `packages/opencode: bun run script/omo-real-model.ts` with the verified pinned model/runtime artifacts and `OMO_REAL_MODEL_REQUIRED=1` | Pass on Windows: lifecycle reached `disposed`, all six representative OMO tasks returned eligible choices, each decision had 16 option slots and finite scores, and the sidecar exited cleanly. |
 
 ## Workflow and architecture guards
 
-The three workflow files were parsed successfully during the workflow review:
+The three workflow files were parsed successfully during the workflow review. The
+macOS shell workflow was also executed on the hosted runner after publishing
+`native-omo` and passed as run
+[35513839709](https://github.com/stoltembergg-png/nextcode/actions/runs/35513839709):
 
 ```text
 .github/workflows/tauri-shell-windows.yml
