@@ -270,6 +270,10 @@ O SemIf deixou de ser plugin externo e passou a ser **recurso nativo do servidor
 - **Runtime co-localizado**: o `llama-server` do llama.cpp carrega os backends ggml **do diretório do
   executável**; `PATH` e `GGML_BACKEND_PATH` não bastam. Por isso o serviço materializa
   `<data>/semif/runtime/<key>/` com o launcher + todas as libs (hardlink quando possível) e spawna de lá.
+- **Backend**: `semif.backend` default `auto` (`cpu | cuda | hip | vulkan`); sem picker nem SDK extra.
+  No `auto`, usa HIP quando o gfx está na matriz TheRock/ROCm; senão, em Windows/Ubuntu x64, descarrega
+  o `llama-server` Vulkan pinado. O sidecar passa `-ngl 99` nesses backends. Polaris (RX 580) é o caso
+  motivador. `hip` explícito continua a reportar `gpu_unsupported` (sem pivot silencioso para Vulkan).
 - **Modelo**: pinado em `manifest.ts` (LFM2-350M Q4_K_M, 229.309.376 bytes, SHA256 verificado), baixado
   em `<data>/semif/models/<sha256[:12]>/`, parcial em `<cache>/semif/downloads/<sha256>.part`, `Range`
   com retomada e rename atômico. Política `download: auto | manual | never`.
