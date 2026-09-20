@@ -321,6 +321,24 @@ it.effect("creates global jsonc config with schema when no global configs exist"
   ),
 )
 
+it.effect("read-only global config lookup does not create or migrate files", () =>
+  withGlobalConfig({ config: { model: "openai/gpt-5" } }, ({ dir }) =>
+    Effect.gen(function* () {
+      const file = path.join(dir, "opencode.json")
+      const before = yield* FSUtil.use.readFileString(file)
+      const service = yield* Config.Service
+
+      const config = yield* service.getGlobalReadOnly()
+
+      expect(config.model).toBe("openai/gpt-5")
+      expect(yield* FSUtil.use.readFileString(file)).toBe(before)
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "config.json"))).toBe(false)
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "opencode.jsonc"))).toBe(false)
+      expect(yield* FSUtil.use.existsSafe(path.join(dir, "config"))).toBe(false)
+    }).pipe(Effect.provide(layer)),
+  ),
+)
+
 it.effect("does not create global config when OPENCODE_CONFIG_DIR is set", () =>
   Effect.gen(function* () {
     const custom = yield* tmpdirScoped()

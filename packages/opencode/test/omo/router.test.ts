@@ -80,6 +80,7 @@ function fakeSemif(
 ): SemifService.Interface {
   return {
     status: () => Effect.sync(() => ((counts.status += 1), current)),
+    statusReadOnly: () => Effect.succeed(current),
     start: () => Effect.sync(() => (counts.start += 1)).pipe(Effect.andThen(start())),
     acquire: () =>
       Effect.sync(() => (counts.acquire += 1)).pipe(

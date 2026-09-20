@@ -55,15 +55,22 @@ function statusLayer(config: ConfigV1.Info, semif: SemifStatusInfo, failure?: st
     lastFailure: () => Effect.succeed(failure ? { reason: failure, durationMs: 1 } : undefined),
     clear: () => Effect.void,
   }
-  const semifService: SemifService.Interface = {
-    status: () => Effect.succeed(semif),
+  const semifService = {
+    status: () => Effect.die("OMO status must not reconcile SemIf state"),
+    statusReadOnly: () => Effect.succeed(semif),
     start: () => Effect.succeed(semif),
     acquire: () => Effect.succeed(semif),
     decide: () => Effect.die("OMO status must not route through SemIf"),
     dispose: () => Effect.void,
-  }
+  } as SemifService.Interface
   return LayerNode.compile(LayerNode.group([OmoStatus.node, Config.node]), [
-    [Config.node, Layer.mock(Config.Service)({ getGlobal: () => Effect.succeed(config) })],
+    [
+      Config.node,
+      Layer.mock(Config.Service)({
+        getGlobal: () => Effect.die("OMO status must not load mutable global config"),
+        getGlobalReadOnly: () => Effect.succeed(config),
+      }),
+    ],
     [SemifService.node, Layer.succeed(SemifService.Service, SemifService.Service.of(semifService))],
     [OmoObservability.node, Layer.succeed(OmoObservability.Service, OmoObservability.Service.of(observations))],
   ])

@@ -32,11 +32,11 @@ const layer = Layer.effect(
     const observability = yield* OmoObservability.Service
 
     const status = Effect.fn("OmoStatus.status")(function* () {
-      const cfg = yield* config.getGlobal()
+      const cfg = yield* config.getGlobalReadOnly()
       const resolved = ConfigOmo.resolve(cfg.omo).info
       const pluginConflict = ConfigOmo.hasLegacyPluginConflict(cfg.plugin)
       const lastFailure = yield* observability.lastFailure()
-      const semifStatus = yield* semif.status()
+      const semifStatus = yield* semif.statusReadOnly()
       const agents = resolved.enabled && !pluginConflict ? agentDefinitions(resolved).map((agent) => agent.id) : []
 
       return {
