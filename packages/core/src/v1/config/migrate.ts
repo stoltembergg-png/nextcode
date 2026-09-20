@@ -6,6 +6,7 @@ import { ConfigMCPV1 } from "./mcp"
 import { ConfigPermissionV1 } from "./permission"
 import { ConfigProviderV1 } from "./provider"
 import { ConfigProviderOptionsV1 } from "./provider-options"
+import { ConfigOmo } from "../../config/omo"
 
 const keys = new Set([
   "logLevel",
@@ -38,7 +39,7 @@ export function migrate(info: typeof ConfigV1.Info.Type) {
     shell: info.shell,
     model: info.model,
     default_agent: info.default_agent,
-    omo: info.omo,
+    omo: Object.hasOwn(info, ConfigOmo.RawInput) ? ConfigOmo.rawInput(info) : info.omo,
     autoupdate: info.autoupdate,
     share: info.share ?? (info.autoshare ? "auto" : undefined),
     enterprise: info.enterprise,

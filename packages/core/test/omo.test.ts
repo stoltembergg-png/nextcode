@@ -86,6 +86,12 @@ describe("ConfigOmo", () => {
     })
   })
 
+  test("keeps observer opt-in when only another specialist is disabled", () => {
+    expect(ConfigOmo.resolve({ disabled_agents: ["librarian"] }).info.agents.observer).toBeUndefined()
+    expect(ConfigOmo.resolve({ disabled_agents: [] }).info.agents.observer).toBeDefined()
+    expect(ConfigOmo.resolve({ agents: { observer: {} } }).info.agents.observer).toBeDefined()
+  })
+
   test("validates background and verification defaults", () => {
     expect(ConfigOmo.resolve({ background: "allow", verification: "observer" }).info).toMatchObject({
       background: "allow",
@@ -149,6 +155,23 @@ describe("ConfigOmo", () => {
       routing: "auto",
       verification: "none",
     })
+  })
+
+  test("caps and sanitizes diagnostics", () => {
+    const longName = `unknown-${"x".repeat(512)}`
+    const result = ConfigOmo.resolve({
+      agents: Object.fromEntries(
+        Array.from({ length: 40 }, (_, index) => [`${longName}-${index}`, { model: "invalid-model" }]),
+      ),
+      disabled_agents: Array.from({ length: 40 }, (_, index) => `disabled-${index}`),
+    })
+
+    expect(result.diagnostics).toHaveLength(32)
+    for (const diagnostic of result.diagnostics) {
+      expect(diagnostic.path.every((part) => part.length <= 64)).toBe(true)
+      expect(diagnostic.message.length).toBeLessThanOrEqual(160)
+    }
+    expect(JSON.stringify(result.diagnostics)).not.toContain("x".repeat(128))
   })
 
   test("decodes the stable schema while ignoring unrelated legacy keys", () => {

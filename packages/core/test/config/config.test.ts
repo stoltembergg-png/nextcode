@@ -5,6 +5,7 @@ import { Effect, Layer, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigProvider } from "@opencode-ai/core/config/provider"
+import { ConfigOmo } from "@opencode-ai/core/config/omo"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigMigrateV1 } from "@opencode-ai/core/v1/config/migrate"
@@ -262,6 +263,51 @@ describe("Config", () => {
         }),
       ),
     ),
+  )
+
+  it.live("retains unrelated config when OMO has an invalid optional field", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            fs.writeFile(
+              path.join(tmp.path, "opencode.json"),
+              JSON.stringify({ model: "openai/gpt-5.6-luna", omo: { routing: "not-a-routing" } }),
+            ),
+          )
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const documents = (yield* config.entries()).filter((entry) => entry.type === "document")
+
+            expect(documents).toHaveLength(1)
+            expect(documents[0]?.info.model).toBe("openai/gpt-5.6-luna")
+            const resolved = ConfigOmo.resolve(documents[0]?.info.omo)
+            expect(resolved.info.routing).toBe("auto")
+            expect(resolved.diagnostics).toContainEqual({
+              kind: "invalid",
+              path: ["routing"],
+              message: "routing has an unsupported value",
+            })
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
+  it.effect("preserves OMO while migrating V1-only configuration", () =>
+    Effect.sync(() => {
+      const migrated = ConfigMigrateV1.migrate({
+        plugin: ["example-plugin"],
+        omo: { preset: "openai", routing: "semif" },
+      })
+
+      expect(migrated.omo).toEqual({ preset: "openai", routing: "semif" })
+      expect(migrated.plugins).toEqual(["example-plugin"])
+    }),
   )
 
   it.live("loads supported scalar and resource configuration", () =>

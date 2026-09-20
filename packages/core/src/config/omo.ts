@@ -89,6 +89,7 @@ export const DEFAULT_BACKGROUND: Background = "auto"
 export const DEFAULT_ROUTING: Routing = "auto"
 export const DEFAULT_VERIFICATION: Verification = "none"
 export const LEGACY_PLUGIN = "oh-my-opencode-slim"
+export const RawInput: unique symbol = Symbol("ConfigOmo.RawInput")
 
 const presetAgents: Readonly<Record<Preset, Readonly<Partial<Record<AgentID, ResolvedAgent>>>>> = {
   auto: {},
@@ -112,6 +113,19 @@ const presetAgents: Readonly<Record<Preset, Readonly<Partial<Record<AgentID, Res
 }
 
 export const PresetAgents = presetAgents
+
+export function attachRawInput<T extends object>(target: T, input: unknown) {
+  Object.defineProperty(target, RawInput, {
+    configurable: true,
+    value: input,
+  })
+  return target
+}
+
+export function rawInput(input: unknown) {
+  if (typeof input !== "object" || input === null) return undefined
+  return (input as { [RawInput]?: unknown })[RawInput]
+}
 
 const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
 const maxDiagnostics = 32
@@ -248,7 +262,10 @@ function readDisabledAgents(raw: Record<string, unknown>, enabled: boolean, diag
 
 function observerIsExplicit(raw: Record<string, unknown>) {
   const agents = isRecord(raw.agents) ? raw.agents : undefined
-  return Array.isArray(raw.disabled_agents) || (agents !== undefined && Object.hasOwn(agents, "observer"))
+  return (
+    (Array.isArray(raw.disabled_agents) && raw.disabled_agents.length === 0) ||
+    (agents !== undefined && Object.hasOwn(agents, "observer"))
+  )
 }
 
 function optionalBoolean(
