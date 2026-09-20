@@ -14,6 +14,8 @@ import {
 } from "../../script/fetch-semif-server"
 
 describe("fetch-semif-server", () => {
+  const posixPath = (value: string) => value.replaceAll("\\", "/")
+
   test("maps linux-x64 to the ubuntu gnu triple", () => {
     expect(HOST_TARGETS["linux-x64"]).toBe("x86_64-unknown-linux-gnu")
     expect(hostTarget("linux", "x64")).toBe("x86_64-unknown-linux-gnu")
@@ -34,8 +36,29 @@ describe("fetch-semif-server", () => {
   })
 
   test("stages hip libraries in a separate resource directory", () => {
-    expect(stagedLibsDir("cpu")).toMatch(/\/semif$/)
-    expect(stagedLibsDir("hip")).toMatch(/\/semif-hip$/)
+    expect(posixPath(stagedLibsDir("cpu"))).toMatch(/\/semif$/)
+    expect(posixPath(stagedLibsDir("hip"))).toMatch(/\/semif-hip$/)
+  })
+
+  test("suffixes vulkan lock keys and staging names", () => {
+    expect(lockTargetKey("x86_64-pc-windows-msvc", "vulkan")).toBe("x86_64-pc-windows-msvc-vulkan")
+    expect(stagedServerName("x86_64-pc-windows-msvc", "vulkan", true)).toBe(
+      "llama-server-x86_64-pc-windows-msvc-vulkan.exe",
+    )
+    expect(posixPath(stagedLibsDir("vulkan"))).toMatch(/\/semif-vulkan$/)
+  })
+
+  test("embedded lockfile pins vulkan targets for windows and linux triples", () => {
+    const lock = embeddedLockfile()
+    const win = lock.targets["x86_64-pc-windows-msvc-vulkan"]
+    const linux = lock.targets["x86_64-unknown-linux-gnu-vulkan"]
+    expect(lock.tag).toBe("b11040")
+    expect(win?.asset).toBe("llama-b11040-bin-win-vulkan-x64.zip")
+    expect(linux?.asset).toBe("llama-b11040-bin-ubuntu-vulkan-x64.tar.gz")
+    expect(win?.bytes).toBe(31821107)
+    expect(linux?.bytes).toBe(30363623)
+    expect(win?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(linux?.sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 
   test("embedded lockfile pins hip targets for the host triple", () => {

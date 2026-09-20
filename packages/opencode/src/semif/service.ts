@@ -16,10 +16,10 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { SemifAcquire } from "./acquire"
-import { amdGpuUnsupportedForWinHip, SemifBackend, readGpuInventory, type BackendVariant } from "./backend"
+import { amdHipUnsupported, SemifBackend, readGpuInventory, type BackendVariant } from "./backend"
 import { SemifHipRuntime } from "./hip-runtime"
-import { unsupportedGfx } from "./gfx"
 import { SemifRocmRuntime } from "./rocm-runtime"
+import { SemifVulkanRuntime } from "./vulkan-runtime"
 import { parseSemifOptions, type SemifMode } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
@@ -104,6 +104,7 @@ const errorMessage = (cause: unknown): string => {
   if (cause instanceof SemifServiceError) return cause.reason
   if (cause instanceof SemifAcquire.AcquireError) return cause.reason
   if (cause instanceof SemifHipRuntime.HipRuntimeError) return cause.reason
+  if (cause instanceof SemifVulkanRuntime.VulkanRuntimeError) return cause.reason
   if (cause instanceof SemifRocmRuntime.RocmRuntimeError) return cause.reason
   if (cause instanceof SemifRuntime.RuntimeError) return cause.reason
   if (cause instanceof SemifSidecar.SidecarError) return cause.reason
@@ -117,6 +118,8 @@ interface State {
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
   readonly rocmFetching?: boolean
+  readonly vulkanDownloadFailed?: boolean
+  readonly vulkanFetching?: boolean
 }
 
 const layer = Layer.effect(
@@ -171,6 +174,8 @@ const layer = Layer.effect(
         hipDownloadFailed: current.hipDownloadFailed,
         hipFetching: current.hipFetching,
         rocmFetching: current.rocmFetching,
+        vulkanDownloadFailed: current.vulkanDownloadFailed,
+        vulkanFetching: current.vulkanFetching,
       })
       if (backend.message) {
         yield* backend.fallback
@@ -204,9 +209,12 @@ const layer = Layer.effect(
       const loaded = yield* load
       const current = yield* Ref.get(state)
       if (!current.handle) return
+      const expectedNgl =
+        loaded.backend.active === "hip" || loaded.backend.active === "vulkan" ? 99 : undefined
       const stale =
         loaded.resolved.mode === "off" ||
-        (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath)
+        (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath) ||
+        current.handle.nGpuLayers !== expectedNgl
       if (!stale) return
       yield* SemifSidecar.dispose(current.handle)
       SemifScoring.clearCaches()
@@ -270,10 +278,60 @@ const layer = Layer.effect(
       return { ...base, status: "offline" as SemifStatus }
     })
 
+    const ensureVulkanRuntime = Effect.gen(function* () {
+      const loaded = yield* load
+      const inventory = readGpuInventory()
+      const requested = loaded.resolved.backend
+      if (!amdHipUnsupported(inventory) && requested !== "vulkan") {
+        return
+      }
+      if (
+        !SemifVulkanRuntime.shouldFetch({
+          requested,
+          serverPath: loaded.resolved.serverPath,
+        })
+      ) {
+        return
+      }
+      yield* Ref.update(state, (value) => ({
+        ...value,
+        status: "downloading" as SemifStatus,
+        error: undefined,
+        vulkanDownloadFailed: false,
+        vulkanFetching: true,
+      }))
+      const exit = yield* provideAcquire(
+        SemifVulkanRuntime.ensure({
+          policy: loaded.download,
+          requested,
+          serverPath: loaded.resolved.serverPath,
+          onProgress: (progress) => {
+            live.progress = progress
+          },
+          onPhase: (phase) =>
+            Effect.runSync(Ref.update(state, (value) => ({ ...value, status: phase as SemifStatus }))),
+        }),
+      ).pipe(Effect.exit)
+      live.progress = undefined
+      yield* Ref.update(state, (value) => ({ ...value, status: "offline" as SemifStatus, vulkanFetching: false }))
+      if (Exit.isFailure(exit)) {
+        if (loaded.download === "auto") {
+          yield* Ref.update(state, (value) => ({ ...value, vulkanDownloadFailed: true }))
+        }
+        yield* Effect.logWarning("semif: Vulkan runtime download failed", { cause: exit.cause })
+        return
+      }
+      yield* Effect.logInfo("semif: Vulkan runtime staged", {
+        acquired: exit.value.acquired,
+        serverPath: exit.value.serverPath,
+        libsPath: exit.value.libsPath,
+      })
+    })
+
     const ensureRocmRuntime = Effect.gen(function* () {
       const loaded = yield* load
       const inventory = readGpuInventory()
-      if (amdGpuUnsupportedForWinHip(inventory) || unsupportedGfx()) {
+      if (amdHipUnsupported(inventory)) {
         return undefined
       }
       if (
@@ -323,7 +381,7 @@ const layer = Layer.effect(
     const ensureHipRuntime = Effect.gen(function* () {
       const loaded = yield* load
       const inventory = readGpuInventory()
-      if (amdGpuUnsupportedForWinHip(inventory) || unsupportedGfx()) {
+      if (amdHipUnsupported(inventory)) {
         return
       }
       if (
@@ -395,15 +453,17 @@ const layer = Layer.effect(
     })
 
     const acquireHandle = Effect.gen(function* () {
-      yield* dropHandleIfStale
       const loaded = yield* load
-      const current = yield* Ref.get(state)
-      if (current.handle) return current.handle
       if (loaded.resolved.mode === "off") {
+        yield* dropHandleIfStale
         return yield* new SemifServiceError({ reason: "semif: disabled (mode=off)" })
       }
+      yield* ensureVulkanRuntime
       yield* ensureHipRuntime
       const rocm = yield* ensureRocmRuntime
+      yield* dropHandleIfStale
+      const current = yield* Ref.get(state)
+      if (current.handle) return current.handle
       const refreshed = yield* load
       if (!refreshed.serverPath) {
         return yield* new SemifServiceError({ reason: "semif: llama-server binary is not available" })
@@ -433,6 +493,8 @@ const layer = Layer.effect(
           loadTimeoutMs: refreshed.resolved.loadTimeoutMs,
           serverPath: runtime.serverPath,
           modelPath: refreshed.modelPath,
+          nGpuLayers:
+            refreshed.backend.active === "hip" || refreshed.backend.active === "vulkan" ? 99 : undefined,
           env:
             rocm?.rocblasLibraryDir
               ? { ROCBLAS_TENSILE_LIBPATH: rocm.rocblasLibraryDir }
@@ -478,6 +540,7 @@ const layer = Layer.effect(
         ),
       acquire: () =>
         Effect.gen(function* () {
+          yield* ensureVulkanRuntime
           yield* ensureHipRuntime
           yield* ensureRocmRuntime
           yield* ensureModel

@@ -6,55 +6,76 @@ import { Cause, Exit, Layer, Effect } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Global } from "@opencode-ai/core/global"
-import { ensure, readHipLock, shouldFetch } from "../../src/semif/hip-runtime"
-import { hipRuntimeDir, SERVER_ENV } from "../../src/semif/paths"
+import { hipPlatformSupported } from "../../src/semif/backend"
+import { ensure, readVulkanLock, shouldFetch } from "../../src/semif/vulkan-runtime"
+import { SERVER_ENV, vulkanRuntimeDir } from "../../src/semif/paths"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 
 const layer = Layer.mergeAll(NodeFileSystem.layer, FetchHttpClient.layer)
 
-describe("semif hip runtime", () => {
-  test("shouldFetch is false when win hip matrix rejects the probed amd gfx", () => {
+describe("semif vulkan runtime", () => {
+  test("shouldFetch is true for auto when HIP rejects gfx803 and vulkan is not staged", () => {
     const triple = hostTarget()
     const isZip = process.platform === "win32"
     const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
-    const inventory = { amd: true, nvidia: false, amdGfx: "gfx803" }
-    expect(
-      shouldFetch({
-        requested: "hip",
-        serverPath: cpu,
-        env: { [SERVER_ENV]: cpu },
-        inventory,
-      }),
-    ).toBe(false)
     expect(
       shouldFetch({
         requested: "auto",
         serverPath: cpu,
         env: { [SERVER_ENV]: cpu },
-        inventory,
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        loaderPresent: true,
+      }),
+    ).toBe(hipPlatformSupported())
+  })
+
+  test("shouldFetch is false when the Vulkan loader is missing", () => {
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
+    expect(
+      shouldFetch({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        loaderPresent: false,
       }),
     ).toBe(false)
   })
 
-  test("shouldFetch is false for cpu preference and true for hip without vendored binary", () => {
+  test("shouldFetch is false for auto on gfx1030", () => {
     const triple = hostTarget()
     const isZip = process.platform === "win32"
     const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
-    expect(shouldFetch({ requested: "cpu", serverPath: cpu, env: { [SERVER_ENV]: cpu } })).toBe(false)
+    expect(
+      shouldFetch({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx1030" },
+      }),
+    ).toBe(false)
+  })
+
+  test("shouldFetch is false for explicit hip even on gfx803", () => {
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
     expect(
       shouldFetch({
         requested: "hip",
         serverPath: cpu,
         env: { [SERVER_ENV]: cpu },
-        inventory: { amd: true, nvidia: false },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
       }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  test("ensure rejects manual download policy when HIP runtime is not staged", async () => {
-    const hip = await readHipLock()
-    if (!hip) return
-    const root = mkdtempSync(path.join(tmpdir(), "semif-hip-runtime-manual-"))
+  test("ensure rejects manual download policy when Vulkan runtime is not staged", async () => {
+    const vulkan = await readVulkanLock()
+    if (!vulkan) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-vulkan-runtime-manual-"))
     const previousData = Global.Path.data
     Object.assign(Global.Path, { data: root })
     try {
@@ -62,7 +83,7 @@ describe("semif hip runtime", () => {
         Effect.provide(
           ensure({
             policy: "manual",
-            requested: "hip",
+            requested: "vulkan",
           }),
           layer,
         ).pipe(Effect.exit),
@@ -79,27 +100,27 @@ describe("semif hip runtime", () => {
     }
   })
 
-  test("ensure reuses a staged HIP runtime directory", async () => {
-    const hip = await readHipLock()
-    if (!hip) return
-    const root = mkdtempSync(path.join(tmpdir(), "semif-hip-runtime-staged-"))
+  test("ensure reuses a staged Vulkan runtime directory", async () => {
+    const vulkan = await readVulkanLock()
+    if (!vulkan) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-vulkan-runtime-staged-"))
     const previousData = Global.Path.data
     Object.assign(Global.Path, { data: root })
-    const dir = hipRuntimeDir(hip.entry.sha256)
+    const dir = vulkanRuntimeDir(vulkan.entry.sha256)
     mkdirSync(dir, { recursive: true })
     const serverName = process.platform === "win32" ? "llama-server.exe" : "llama-server"
     const serverPath = path.join(dir, serverName)
-    writeFileSync(serverPath, "hip-server")
-    writeFileSync(path.join(dir, "ggml-hip.dll"), "lib")
+    writeFileSync(serverPath, "vulkan-server")
+    writeFileSync(path.join(dir, "ggml-vulkan.dll"), "lib")
     writeFileSync(
-      path.join(dir, ".hip-runtime.json"),
+      path.join(dir, ".vulkan-runtime.json"),
       `${JSON.stringify({
         version: 1,
-        sha256: hip.entry.sha256,
-        target: hip.target,
+        sha256: vulkan.entry.sha256,
+        target: vulkan.target,
         files: [
-          { name: serverName, bytes: Buffer.byteLength("hip-server") },
-          { name: "ggml-hip.dll", bytes: Buffer.byteLength("lib") },
+          { name: serverName, bytes: Buffer.byteLength("vulkan-server") },
+          { name: "ggml-vulkan.dll", bytes: Buffer.byteLength("lib") },
         ],
       })}\n`,
     )
@@ -108,7 +129,7 @@ describe("semif hip runtime", () => {
         Effect.provide(
           ensure({
             policy: "auto",
-            requested: "hip",
+            requested: "vulkan",
           }),
           layer,
         ),

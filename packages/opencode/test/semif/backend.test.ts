@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 import {
   amdGpuUnsupportedForWinHip,
+  amdHipUnsupported,
   gfxFromAmdDeviceId,
   hipPlatformSupported,
   resolveBackend,
@@ -12,6 +13,7 @@ import {
   rocmRuntimeSearchPaths,
   therockWinHipGfxSupported,
 } from "../../src/semif/backend"
+import { GFX_ENV } from "../../src/semif/gfx"
 import { SERVER_ENV } from "../../src/semif/paths"
 
 describe("semif backend", () => {
@@ -37,7 +39,13 @@ describe("semif backend", () => {
     expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx803" }, "linux", "x64")).toBe(false)
   })
 
-  test("known unsupported gfx settles before HIP fetch on win32", () => {
+  test("amdHipUnsupported env-firsts over Windows TheRock inventory", () => {
+    const inventory = { amd: true, nvidia: false, amdGfx: "gfx803" }
+    expect(amdHipUnsupported(inventory, { [GFX_ENV]: "gfx1030" }, "win32", "x64")).toBe(false)
+    expect(amdHipUnsupported(inventory, {}, "win32", "x64")).toBe(true)
+  })
+
+  test("auto gfx803 without a vulkan launcher stays cpu, not gpu_unsupported", () => {
     if (!hipPlatformSupported()) return
     const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gpu-unsupported-"))
     const triple = hostTarget()
@@ -52,15 +60,24 @@ describe("semif backend", () => {
         env: { [SERVER_ENV]: cpu },
         inventory,
         rocmRuntimePresent: true,
-        hipFetching: true,
+        vulkanLoaderPresent: true,
       })
-      if (process.platform === "win32") {
-        expect(status.active).toBe("cpu")
-        expect(status.fallbackReason).toBe("gpu_unsupported")
-        expect(status.message).toContain("gfx803")
-        return
-      }
+      expect(status.active).toBe("cpu")
       expect(status.fallbackReason).not.toBe("gpu_unsupported")
+      expect(status.fallbackReason).toBe("no_vendored_binary")
+
+      const fetching = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory,
+        rocmRuntimePresent: true,
+        vulkanFetching: true,
+        vulkanLoaderPresent: true,
+      })
+      expect(fetching.active).toBe("cpu")
+      expect(fetching.fallbackReason).not.toBe("gpu_unsupported")
+      expect(fetching.message).toContain("Vulkan")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -344,6 +361,183 @@ describe("semif backend", () => {
       expect(rocmRuntimePresentAt([bindir], "win32")).toBe(true)
       expect(rocmRuntimePresentAt([bindir], "linux")).toBe(false)
       expect(rocmRuntimeSearchPaths({ ROCM_PATH: root }, "win32")).toContain(bindir)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("auto on gfx803 selects vulkan when the vulkan launcher exists", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-vulkan-auto-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        rocmRuntimePresent: false,
+        vulkanLoaderPresent: true,
+      })
+      expect(status.active).toBe("vulkan")
+      expect(status.fallback).toBe(false)
+      expect(status.fallbackReason).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("explicit hip on gfx803 stays gpu_unsupported and does not activate vulkan", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-polar-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "hip",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallbackReason).toBe("gpu_unsupported")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("auto on Windows gfx1010 prefers hip over vulkan", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-therock-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      if (process.platform !== "win32") return
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx1010" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("hip")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("NEXTCODE_SEMIF_GFX supported override wins over polaris inventory", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gfx-env-win-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu, [GFX_ENV]: "gfx1030" },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("hip")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("auto on gfx1030 still prefers hip over vulkan", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-rdna-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx1030" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("hip")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("explicit vulkan activates when the vulkan launcher exists", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-vulkan-explicit-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "vulkan",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        vulkanLoaderPresent: true,
+      })
+      expect(status.active).toBe("vulkan")
+      expect(status.fallback).toBe(false)
+      expect(status.fallbackReason).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("missing Vulkan loader stays on CPU with missing_vulkan_runtime", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-vulkan-icd-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        vulkanLoaderPresent: false,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallback).toBe(true)
+      expect(status.fallbackReason).toBe("missing_vulkan_runtime")
+      expect(status.systemRuntimeMissing).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

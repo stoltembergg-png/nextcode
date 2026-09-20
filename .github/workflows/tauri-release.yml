@@ -139,6 +139,7 @@ jobs:
             BASE="$TARGET"
             case "$TARGET" in
               *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
+              *-vulkan) VARIANT=vulkan; BASE="${TARGET%-vulkan}" ;;
             esac
             export NEXTCODE_SEMIF_MIRROR="https://github.com/${REPO}/releases/download/${MIRROR_TAG}/${NAME}"
             bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only

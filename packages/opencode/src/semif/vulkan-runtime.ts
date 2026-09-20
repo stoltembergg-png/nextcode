@@ -1,9 +1,9 @@
-// On-demand HIP llama-server runtime acquisition.
+// On-demand Vulkan llama-server runtime acquisition.
 //
-// The CPU bundle stays lean; when HIP is desired and the vendored HIP binary is
-// absent, `ensureHipRuntime` downloads the pinned archive from the published
+// The CPU bundle stays lean; when Vulkan is desired and the vendored Vulkan
+// binary is absent, `ensure` downloads the pinned archive from the published
 // mirror (or upstream), verifies sha256 against `semif-server.lock.json`, and
-// stages launcher + HIP libs under `<data>/semif/runtime/hip-<sha12>/`.
+// stages launcher + Vulkan libs under `<data>/semif/runtime/vulkan-<sha12>/`.
 
 import path from "node:path"
 import { Cause, Effect, Exit, FileSystem, Option, Schema } from "effect"
@@ -22,11 +22,13 @@ import {
   hipPlatformSupported,
   readGpuInventory,
   vendoredBinaryExists,
+  vulkanLoaderPresent,
   type BackendPreference,
+  type GpuInventory,
 } from "./backend"
 import { SemifPaths } from "./paths"
 
-const MARKER_NAME = ".hip-runtime.json"
+const MARKER_NAME = ".vulkan-runtime.json"
 const MARKER_VERSION = 1
 
 const Marker = Schema.fromJsonString(
@@ -42,11 +44,11 @@ const decodeMarker = Schema.decodeUnknownOption(Marker)
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause))
 
 const errorMessage = (cause: unknown): string =>
-  cause instanceof HipRuntimeError || cause instanceof SemifAcquire.AcquireError
+  cause instanceof VulkanRuntimeError || cause instanceof SemifAcquire.AcquireError
     ? cause.reason
     : message(cause)
 
-export class HipRuntimeError extends Schema.TaggedErrorClass<HipRuntimeError>()("SemifHipRuntimeError", {
+export class VulkanRuntimeError extends Schema.TaggedErrorClass<VulkanRuntimeError>()("SemifVulkanRuntimeError", {
   reason: Schema.String,
 }) {
   override get message() {
@@ -54,7 +56,7 @@ export class HipRuntimeError extends Schema.TaggedErrorClass<HipRuntimeError>()(
   }
 }
 
-export interface HipLock {
+export interface VulkanLock {
   readonly lock: Lockfile
   readonly baseTarget: string
   readonly target: string
@@ -79,10 +81,10 @@ export interface EnsureResult {
   readonly acquired: boolean
 }
 
-export async function readHipLock(): Promise<HipLock | undefined> {
+export async function readVulkanLock(): Promise<VulkanLock | undefined> {
   const lock = await readLockfile()
   const baseTarget = hostTarget()
-  const target = lockTargetKey(baseTarget, "hip")
+  const target = lockTargetKey(baseTarget, "vulkan")
   const entry = lock.targets[target]
   if (!entry) return undefined
   return { lock, baseTarget, target, entry }
@@ -92,17 +94,21 @@ export function shouldFetch(input: {
   readonly requested: BackendPreference
   readonly serverPath?: string
   readonly env?: Record<string, string | undefined>
-  readonly inventory?: ReturnType<typeof readGpuInventory>
+  readonly inventory?: GpuInventory
+  readonly loaderPresent?: boolean
 }): boolean {
   if (!hipPlatformSupported()) return false
-  if (input.requested === "cpu" || input.requested === "cuda" || input.requested === "vulkan") return false
+  if (input.requested === "cpu" || input.requested === "cuda" || input.requested === "hip") return false
   const inventory = input.inventory ?? readGpuInventory()
-  if (input.requested === "auto" && inventory.amd && inventory.nvidia) return false
-  if (input.requested === "auto" && !inventory.amd) return false
-  if (input.requested === "hip" && !inventory.amd) return false
+  if (inventory.amd && inventory.nvidia) return false
   const env = input.env ?? process.env
-  if (amdHipUnsupported(inventory, env)) return false
-  return !vendoredBinaryExists("hip", input.serverPath, env)
+  if (input.requested === "auto") {
+    if (!inventory.amd) return false
+    if (!amdHipUnsupported(inventory, env)) return false
+  }
+  if (input.requested === "vulkan" && !inventory.amd) return false
+  if (!(input.loaderPresent ?? vulkanLoaderPresent(env))) return false
+  return !vendoredBinaryExists("vulkan", input.serverPath, env)
 }
 
 const isComplete = (
@@ -118,51 +124,51 @@ const isComplete = (
     return true
   })
 
-const readStaged = Effect.fnUntraced(function* (hip: HipLock) {
+const readStaged = Effect.fnUntraced(function* (vulkan: VulkanLock) {
   const fs = yield* FileSystem.FileSystem
-  const dir = SemifPaths.hipRuntimeDir(hip.entry.sha256)
+  const dir = SemifPaths.vulkanRuntimeDir(vulkan.entry.sha256)
   const markerPath = path.join(dir, MARKER_NAME)
   const marker = yield* fs.readFileString(markerPath).pipe(Effect.orElseSucceed(() => ""))
   const decoded = decodeMarker(marker)
   if (Option.isNone(decoded)) return undefined
-  if (decoded.value.version !== MARKER_VERSION || decoded.value.sha256 !== hip.entry.sha256) return undefined
+  if (decoded.value.version !== MARKER_VERSION || decoded.value.sha256 !== vulkan.entry.sha256) return undefined
   if (!(yield* isComplete(fs, dir, decoded.value.files))) return undefined
   const serverName =
     decoded.value.files.find((file) => file.name.startsWith("llama-server"))?.name ?? SemifPaths.serverBinaryName()
   return { serverPath: path.join(dir, serverName), libsPath: dir, acquired: false } satisfies EnsureResult
 })
 
-export const ensure = Effect.fn("SemifHipRuntime.ensure")(function* (input: EnsureInput) {
-  const hip = yield* Effect.tryPromise({
-    try: () => readHipLock(),
-    catch: (cause) => new HipRuntimeError({ reason: `semif: cannot read HIP lock: ${message(cause)}` }),
+export const ensure = Effect.fn("SemifVulkanRuntime.ensure")(function* (input: EnsureInput) {
+  const vulkan = yield* Effect.tryPromise({
+    try: () => readVulkanLock(),
+    catch: (cause) => new VulkanRuntimeError({ reason: `semif: cannot read Vulkan lock: ${message(cause)}` }),
   })
-  if (!hip) {
-    return yield* new HipRuntimeError({ reason: "semif: HIP target is not pinned for this platform" })
+  if (!vulkan) {
+    return yield* new VulkanRuntimeError({ reason: "semif: Vulkan target is not pinned for this platform" })
   }
 
-  const staged = yield* readStaged(hip)
+  const staged = yield* readStaged(vulkan)
   if (staged) return staged
 
   if (input.policy !== "auto") {
-    return yield* new HipRuntimeError({
-      reason: `semif: HIP runtime is not staged and download=${input.policy}`,
+    return yield* new VulkanRuntimeError({
+      reason: `semif: Vulkan runtime is not staged and download=${input.policy}`,
     })
   }
 
   const fs = yield* FileSystem.FileSystem
-  const archive = path.join(SemifPaths.downloadsRoot(), hip.entry.asset)
-  const part = SemifPaths.partPath(hip.entry.sha256)
+  const archive = path.join(SemifPaths.downloadsRoot(), vulkan.entry.asset)
+  const part = SemifPaths.partPath(vulkan.entry.sha256)
   input.onPhase?.("downloading")
-  const candidates = input.sources ?? downloadCandidates(hip.lock, hip.target, hip.entry, input.env)
-  let lastError = `semif: no download source available for ${hip.entry.asset}`
+  const candidates = input.sources ?? downloadCandidates(vulkan.lock, vulkan.target, vulkan.entry, input.env)
+  let lastError = `semif: no download source available for ${vulkan.entry.asset}`
   let downloaded = false
   for (const url of candidates) {
     const exit = yield* SemifAcquire.download({
       dest: archive,
       part,
-      sha256: hip.entry.sha256,
-      expectedBytes: hip.entry.bytes,
+      sha256: vulkan.entry.sha256,
+      expectedBytes: vulkan.entry.bytes,
       maxAttempts: input.maxAttempts ?? 2,
       resolveUrl: () => Effect.succeed(url),
       onProgress: input.onProgress,
@@ -173,26 +179,28 @@ export const ensure = Effect.fn("SemifHipRuntime.ensure")(function* (input: Ensu
     }
     lastError = errorMessage(Cause.squash(exit.cause))
   }
-  if (!downloaded) return yield* new HipRuntimeError({ reason: lastError })
+  if (!downloaded) return yield* new VulkanRuntimeError({ reason: lastError })
 
   input.onPhase?.("verifying")
-  const dir = SemifPaths.hipRuntimeDir(hip.entry.sha256)
+  const dir = SemifPaths.vulkanRuntimeDir(vulkan.entry.sha256)
   const stagedFiles = yield* Effect.tryPromise({
-    try: () => stageExtractedToDir(archive, hip.entry.asset, hip.baseTarget, dir),
-    catch: (cause) => new HipRuntimeError({ reason: `semif: cannot stage HIP runtime: ${message(cause)}` }),
+    try: () => stageExtractedToDir(archive, vulkan.entry.asset, vulkan.baseTarget, dir),
+    catch: (cause) => new VulkanRuntimeError({ reason: `semif: cannot stage Vulkan runtime: ${message(cause)}` }),
   })
 
   const marker = {
     version: MARKER_VERSION,
-    sha256: hip.entry.sha256,
-    target: hip.target,
+    sha256: vulkan.entry.sha256,
+    target: vulkan.target,
     files: stagedFiles.files,
   }
   yield* fs
     .writeFileString(path.join(dir, MARKER_NAME), `${JSON.stringify(marker, null, 2)}\n`)
-    .pipe(Effect.mapError((cause) => new HipRuntimeError({ reason: `semif: cannot write HIP marker: ${cause.message}` })))
+    .pipe(
+      Effect.mapError((cause) => new VulkanRuntimeError({ reason: `semif: cannot write Vulkan marker: ${cause.message}` })),
+    )
 
   return { serverPath: stagedFiles.serverPath, libsPath: stagedFiles.libsPath, acquired: true } satisfies EnsureResult
 })
 
-export * as SemifHipRuntime from "./hip-runtime"
+export * as SemifVulkanRuntime from "./vulkan-runtime"

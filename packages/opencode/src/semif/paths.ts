@@ -14,16 +14,29 @@
 // directory is keyed by the launcher/libraries content so a new vendored build
 // gets a fresh directory and the old one can be garbage-collected.
 
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
+import { Option, Schema } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { embeddedLockfile, HOST_TARGETS, hostTarget, lockTargetKey, stagedServerName } from "../../script/fetch-semif-server"
 import type { BackendVariant } from "./backend"
+
+const VULKAN_MARKER_VERSION = 1
+const VulkanRuntimeMarker = Schema.fromJsonString(
+  Schema.Struct({
+    version: Schema.Number,
+    sha256: Schema.String,
+    target: Schema.optional(Schema.String),
+    files: Schema.Array(Schema.Struct({ name: Schema.String, bytes: Schema.Number })),
+  }),
+)
+const decodeVulkanMarker = Schema.decodeUnknownOption(VulkanRuntimeMarker)
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
 export const SERVER_ENV_FALLBACK = "SEMIF_SERVER_PATH"
 export const LIBS_ENV = "NEXTCODE_SEMIF_LIBS_PATH"
 export const LIBS_HIP_ENV = "NEXTCODE_SEMIF_HIP_LIBS_PATH"
+export const LIBS_VULKAN_ENV = "NEXTCODE_SEMIF_VULKAN_LIBS_PATH"
 
 export function modelsRoot(): string {
   return path.join(Global.Path.data, "semif", "models")
@@ -57,12 +70,20 @@ export function hipRuntimeDir(sha256: string): string {
   return path.join(runtimeRoot(), `hip-${sha256.slice(0, 12)}`)
 }
 
+export function vulkanRuntimeDir(sha256: string): string {
+  return path.join(runtimeRoot(), `vulkan-${sha256.slice(0, 12)}`)
+}
+
 export function rocmRuntimeDir(key: string): string {
   return path.join(runtimeRoot(), key)
 }
 
 export function hipRuntimeMarkerPath(sha256: string): string {
   return path.join(hipRuntimeDir(sha256), ".hip-runtime.json")
+}
+
+export function vulkanRuntimeMarkerPath(sha256: string): string {
+  return path.join(vulkanRuntimeDir(sha256), ".vulkan-runtime.json")
 }
 
 export function serverBinaryName(): string {
@@ -101,10 +122,15 @@ export function resolveServerPath(input: ServerPathInput = {}): string | undefin
     const derived = serverPathForVariant(configured, variant)
     if (derived) return derived
     if (variant === "hip") return resolveStagedHipServerPath(env)
+    if (variant === "vulkan") return resolveStagedVulkanServerPath(env)
     return undefined
   }
   if (variant === "hip") {
     const staged = resolveStagedHipServerPath(env)
+    if (staged) return staged
+  }
+  if (variant === "vulkan") {
+    const staged = resolveStagedVulkanServerPath(env)
     if (staged) return staged
   }
   const dev = input.devFallback ?? defaultDevServerPath(variant)
@@ -160,6 +186,13 @@ export function resolveLibsPath(
     if (staged) return staged
     return undefined
   }
+  if (variant === "vulkan") {
+    const configured = readString(env[LIBS_VULKAN_ENV])
+    if (configured) return configured
+    const staged = resolveStagedVulkanLibsPath(env)
+    if (staged) return staged
+    return undefined
+  }
   return readString(env[LIBS_ENV])
 }
 
@@ -194,6 +227,17 @@ export function pinnedHipSha256(): string | undefined {
   }
 }
 
+export function pinnedVulkanSha256(): string | undefined {
+  try {
+    const lock = embeddedLockfile()
+    const target = lockTargetKey(hostTarget(), "vulkan")
+    const sha256 = lock.targets[target]?.sha256
+    return typeof sha256 === "string" ? sha256 : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function stagedHipRuntimeDirComplete(dir: string): boolean {
   const markerPath = path.join(dir, ".hip-runtime.json")
   if (existsSync(markerPath)) return true
@@ -205,6 +249,48 @@ function readStagedHipRuntimeDir(_env: Record<string, string | undefined>): stri
   if (!sha256) return undefined
   const dir = hipRuntimeDir(sha256)
   if (!stagedHipRuntimeDirComplete(dir)) return undefined
+  return dir
+}
+
+function resolveStagedVulkanServerPath(env: Record<string, string | undefined>): string | undefined {
+  const dir = readStagedVulkanRuntimeDir(env)
+  if (!dir) return undefined
+  const named = hostTargetOrUndefined()
+  if (named) {
+    const isZip = process.platform === "win32"
+    const staged = path.join(dir, stagedServerName(named, "vulkan", isZip))
+    if (existsSync(staged)) return staged
+  }
+  const binary = path.join(dir, serverBinaryName())
+  if (existsSync(binary)) return binary
+  return undefined
+}
+
+function resolveStagedVulkanLibsPath(env: Record<string, string | undefined>): string | undefined {
+  const dir = readStagedVulkanRuntimeDir(env)
+  if (!dir || !existsSync(dir)) return undefined
+  return dir
+}
+
+function stagedVulkanRuntimeDirComplete(dir: string, sha256: string): boolean {
+  const markerPath = path.join(dir, ".vulkan-runtime.json")
+  if (!existsSync(markerPath)) return false
+  const decoded = decodeVulkanMarker(readFileSync(markerPath, "utf8"))
+  if (Option.isNone(decoded)) return false
+  if (decoded.value.version !== VULKAN_MARKER_VERSION || decoded.value.sha256 !== sha256) return false
+  if (decoded.value.files.length === 0) return false
+  return decoded.value.files.every((file) => {
+    const full = path.join(dir, file.name)
+    if (!existsSync(full)) return false
+    return statSync(full).size === file.bytes
+  })
+}
+
+function readStagedVulkanRuntimeDir(_env: Record<string, string | undefined>): string | undefined {
+  const sha256 = pinnedVulkanSha256()
+  if (!sha256) return undefined
+  const dir = vulkanRuntimeDir(sha256)
+  if (!stagedVulkanRuntimeDirComplete(dir, sha256)) return undefined
   return dir
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { ChildProcessSpawner, make } from "effect/unstable/process/ChildProcessSpawner"
 import { FetchHttpClient } from "effect/unstable/http"
-import { dispose, ensure } from "../../src/semif/sidecar"
+import { dispose, ensure, sidecarArgs } from "../../src/semif/sidecar"
 
 // Adoption and fallback never spawn, so this layer fails loudly if they try.
 const spawner = Layer.succeed(
@@ -14,7 +14,7 @@ const layer = Layer.mergeAll(FetchHttpClient.layer, spawner)
 
 const MODEL_PATH = "/models/LFM2-350M-Q4_K_M.gguf"
 
-function handlerFor(modelPath: string) {
+function handlerFor(modelPath: string, nGpuLayers?: number) {
   return (req: Request) => {
     const url = new URL(req.url)
     if (url.pathname === "/health") {
@@ -24,10 +24,16 @@ function handlerFor(modelPath: string) {
       })
     }
     if (url.pathname === "/props") {
-      return new Response(JSON.stringify({ model_path: modelPath }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
+      return new Response(
+        JSON.stringify({
+          model_path: modelPath,
+          ...(nGpuLayers === undefined ? {} : { n_gpu_layers: nGpuLayers }),
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      )
     }
     return new Response("not found", { status: 404 })
   }
@@ -41,6 +47,42 @@ const config = (port: number) => ({
   loadTimeoutMs: 5_000,
   serverPath: "/nonexistent/llama-server",
   modelPath: MODEL_PATH,
+})
+
+test("cpu sidecar omits ngl", () => {
+  expect(
+    sidecarArgs(
+      {
+        host: "127.0.0.1",
+        port: 8817,
+        threads: 4,
+        contextSize: 2048,
+        loadTimeoutMs: 1000,
+        serverPath: "/llama-server",
+        modelPath: "/model.gguf",
+      },
+      8817,
+    ).includes("-ngl"),
+  ).toBe(false)
+})
+
+test("gpu sidecar offloads all layers", () => {
+  const args = sidecarArgs(
+    {
+      host: "127.0.0.1",
+      port: 8817,
+      threads: 4,
+      contextSize: 2048,
+      loadTimeoutMs: 1000,
+      serverPath: "/llama-server",
+      modelPath: "/model.gguf",
+      nGpuLayers: 99,
+    },
+    8817,
+  )
+  const index = args.indexOf("-ngl")
+  expect(index).toBeGreaterThanOrEqual(0)
+  expect(args[index + 1]).toBe("99")
 })
 
 describe("semif sidecar", () => {
@@ -94,6 +136,29 @@ describe("semif sidecar", () => {
     } finally {
       primary.stop(true)
       fallback.stop(true)
+    }
+  })
+
+  test("does not adopt a CPU server when GPU layers are requested", async () => {
+    const server = Bun.serve({ port: 0, fetch: handlerFor(MODEL_PATH, 0) })
+    const port = server.port ?? 0
+    try {
+      const handle = await Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            ensure({
+              ...config(port),
+              nGpuLayers: 99,
+            }),
+            layer,
+          ),
+        ),
+      )
+      expect(handle.adopted).toBe(false)
+    } catch (error) {
+      expect(String(error)).toContain("must not spawn")
+    } finally {
+      server.stop(true)
     }
   })
 })
