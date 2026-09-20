@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 import { embeddedRocmLock, rocmRuntimeComplete, runtimeStageKey } from "../../script/fetch-rocm-runtime"
 import { hostTarget } from "../../script/fetch-semif-server"
-import { isSupportedGfx, resolveSupportedGfx, unsupportedGfx } from "./gfx"
+import { GFX_ENV, isSupportedGfx, resolveSupportedGfx, unsupportedGfx } from "./gfx"
 import { rocmVendorSupported } from "./rocm-runtime"
 import { SemifPaths } from "./paths"
 
@@ -179,8 +179,13 @@ export function amdHipUnsupported(
   platform = process.platform,
   arch = process.arch,
 ): boolean {
+  // Env gfx wins over inventory so NEXTCODE_SEMIF_GFX can force HIP on a
+  // Polaris PCI id, or Vulkan on a supported inventory family.
+  if (env[GFX_ENV]?.trim()) return Boolean(unsupportedGfx(env, platform))
   if (amdGpuUnsupportedForWinHip(inventory, platform, arch)) return true
-  if (inventory.amdGfx && !isSupportedGfx(inventory.amdGfx)) return true
+  // Linux ROCm wheels are narrower than Windows TheRock. Do not feed Windows
+  // inventory gfx (e.g. gfx1010) through isSupportedGfx.
+  if (platform !== "win32" && inventory.amdGfx && !isSupportedGfx(inventory.amdGfx)) return true
   return Boolean(unsupportedGfx(env, platform))
 }
 
@@ -450,9 +455,12 @@ function resolveHip(input: {
     )
   }
 
-  const blockedGfx =
-    unsupportedGfx(input.env) ??
-    (input.inventory.amdGfx && !isSupportedGfx(input.inventory.amdGfx) ? input.inventory.amdGfx : undefined)
+  const blockedGfx = input.env[GFX_ENV]?.trim()
+    ? unsupportedGfx(input.env)
+    : (unsupportedGfx(input.env) ??
+      (process.platform !== "win32" && input.inventory.amdGfx && !isSupportedGfx(input.inventory.amdGfx)
+        ? input.inventory.amdGfx
+        : undefined))
   if (blockedGfx) {
     return fallbackCpu(
       input.requested,

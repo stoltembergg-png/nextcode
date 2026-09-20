@@ -12,6 +12,7 @@ import {
   rocmRuntimeSearchPaths,
   therockWinHipGfxSupported,
 } from "../../src/semif/backend"
+import { GFX_ENV } from "../../src/semif/gfx"
 import { SERVER_ENV } from "../../src/semif/paths"
 
 describe("semif backend", () => {
@@ -393,6 +394,57 @@ describe("semif backend", () => {
       })
       expect(status.active).toBe("cpu")
       expect(status.fallbackReason).toBe("gpu_unsupported")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("auto on Windows gfx1010 prefers hip over vulkan", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-hip-therock-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      if (process.platform !== "win32") return
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx1010" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("hip")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("NEXTCODE_SEMIF_GFX supported override wins over polaris inventory", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gfx-env-win-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const hip = path.join(root, stagedServerName(triple, "hip", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(hip, "hip")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu, [GFX_ENV]: "gfx1030" },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        rocmRuntimePresent: true,
+      })
+      expect(status.active).toBe("hip")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
