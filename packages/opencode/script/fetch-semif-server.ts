@@ -103,6 +103,25 @@ export function downloadCandidates(
   return [...new Set([mirror, published, upstream].filter((url): url is string => Boolean(url)))]
 }
 
+export const CURL_MAX_TIME_SECONDS = 300
+
+export function curlDownloadArgs(dest: string, url: string): string[] {
+  return [
+    "-fL",
+    "-4",
+    "--retry",
+    "3",
+    "--retry-delay",
+    "2",
+    "--max-time",
+    String(CURL_MAX_TIME_SECONDS),
+    "--progress-bar",
+    "-o",
+    dest,
+    url,
+  ]
+}
+
 export const HOST_TARGETS: Record<string, string> = {
   "win32-x64": "x86_64-pc-windows-msvc",
   "darwin-arm64": "aarch64-apple-darwin",
@@ -224,7 +243,18 @@ async function isUpToDate(markerPath: string, tag: string, entry: TargetLock): P
   return marker.staged.every((file) => existsSync(file.path) && statSync(file.path).size === file.bytes)
 }
 
-const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
+async function downloadUrl(url: string, dest: string): Promise<string | undefined> {
+  // Bun.fetch hangs on GitHub release-asset redirects in Actions: the request
+  // logs "downloading" and never finishes, and AbortSignal.timeout does not
+  // abort the body. curl -4 + --max-time is the bounded path.
+  const proc = Bun.spawn(["curl", ...curlDownloadArgs(dest, url)], {
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+  const code = await proc.exited
+  if (code === 0) return undefined
+  return `curl exit ${code}: ${url}`
+}
 
 async function ensureArchive(
   lock: Lockfile,
@@ -245,16 +275,13 @@ async function ensureArchive(
   let lastError = `no download source available for ${entry.asset}`
   for (const url of candidates) {
     console.log(`downloading ${url}`)
-    const response = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    }).catch(() => undefined)
-    if (!response?.ok) {
-      lastError = `download failed (${response ? response.status : "network error"}): ${url}`
+    const error = await downloadUrl(url, archive)
+    if (error) {
+      lastError = `download failed (${error})`
       console.warn(lastError)
+      rmSync(archive, { force: true })
       continue
     }
-    await Bun.write(archive, response)
     const actual = await inspect(archive)
     if (actual.bytes === entry.bytes && actual.sha256 === entry.sha256) return archive
     lastError =

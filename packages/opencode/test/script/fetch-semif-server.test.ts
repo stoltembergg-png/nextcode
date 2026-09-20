@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  curlDownloadArgs,
   downloadCandidates,
   embeddedLockfile,
   HOST_TARGETS,
@@ -130,5 +131,22 @@ describe("fetch-semif-server", () => {
         NEXTCODE_SEMIF_UPSTREAM_ONLY: "1",
       }),
     ).toEqual(["https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-vulkan-x64.zip"])
+  })
+
+  test("curl download forces IPv4, follows redirects, and bounds wall time", () => {
+    expect(curlDownloadArgs("/tmp/llama.zip", "https://example.com/llama.zip")).toEqual([
+      "-fL",
+      "-4",
+      "--retry",
+      "3",
+      "--retry-delay",
+      "2",
+      "--max-time",
+      "300",
+      "--progress-bar",
+      "-o",
+      "/tmp/llama.zip",
+      "https://example.com/llama.zip",
+    ])
   })
 })
