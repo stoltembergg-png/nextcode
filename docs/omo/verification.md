@@ -6,7 +6,7 @@ Platform: Windows, PowerShell, Bun 1.3.14 (x64)
 
 Branch: `native-omo`
 
-Native branch tip at evidence capture: `98d03ef1bd` (the evidence document and
+Native branch tip at evidence capture: `1711741459` (the evidence document and
 port-matrix updates are the following documentation-only commits).
 
 Upstream-sync base: `4084bc57bdc0b331fbce30a7d563ddb93ef4272c` (`chore: merge upstream dev`)
@@ -44,6 +44,7 @@ are clean.
 | Desktop renderer | `packages/desktop: bun run build:renderer-tauri` | Pass. |
 | Desktop tests | `packages/desktop: bun test` | Known environment failure while loading `node:sqlite`; this remains a baseline/runtime limitation. |
 | Controlled packaged smoke | `packages/opencode: bun run src/index.ts --pure debug omo-smoke --json` with SemIf disabled and isolated config/data/state directories | Pass on Windows: native agents discovered, foreground and background V2 services completed, active jobs returned to zero, and disposal evidence was true. No real-model download occurred. |
+| Real-model SemIf probe | `packages/opencode: bun run script/omo-real-model.ts` with the verified pinned model/runtime artifacts and `OMO_REAL_MODEL_REQUIRED=1` | Pass on Windows: lifecycle reached `disposed`, all six representative OMO tasks returned eligible choices, each decision had 16 option slots and finite scores, and the sidecar exited cleanly. |
 
 ## Workflow and architecture guards
 
@@ -105,14 +106,15 @@ validation; no whitespace or object-integrity issue was found.
 contract: eligible slots, the 16-option bound, malformed/missing/ineligible
 answers, finite diagnostic scores, and sanitized lifecycle output.
 
-The actual pinned SemIf runtime/model workflow in
-`.github/workflows/omo-real-model.yml` is deliberately **manual/nightly**. It
-uses the verified pinned runtime and model on its supported runner, while the
-ordinary CI and local smoke path use controlled/offline SemIf behavior. A real
-model probe was not claimed as a local blocking pass because the pinned model
-artifacts are not present in this Windows worktree. The workflow is the required
-execution path for that evidence and must remain redaction-safe for prompts,
-secrets, and local paths.
+The pinned SemIf runtime/model workflow in `.github/workflows/omo-real-model.yml`
+remains deliberately **manual/nightly** for hosted execution. A Windows probe
+was also executed locally with the verified `LFM2-1.2B-Q4_K_M.gguf` artifact
+(730,893,248 bytes; SHA-256
+`55175400e3f509a9616227afeffd58d87e80b9f628a5d3d54ada884d85221fed`) and the
+locked `llama.cpp b11040` runtime. It reached `ready`, completed all six
+representative tasks, and disposed the sidecar cleanly. The workflow remains the
+cross-platform execution path and must stay redaction-safe for prompts, secrets,
+and local paths.
 
 ## Scope boundary
 
