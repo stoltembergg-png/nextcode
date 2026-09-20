@@ -869,6 +869,7 @@ export const dict = {
   "semif.backend.fallback.gpu_unsupported": "This AMD GPU isn’t supported by the current HIP build.",
   "semif.backend.fallback.missing_rocm_runtime": "Using CPU — ROCm/HIP system runtime missing",
   "semif.backend.fallback.no_vendored_binary": "Using CPU — HIP binary not included in this build",
+  "semif.backend.fallback.no_vendored_binary_vulkan": "Using CPU — Vulkan binary not included in this build",
   "semif.backend.fallback.hip_download_failed": "Using CPU — HIP runtime download failed",
   "semif.backend.fallback.vulkan_download_failed": "Using CPU — Vulkan runtime download failed",
   "semif.backend.fallback.unsupported_variant": "Using CPU — requested backend not available",

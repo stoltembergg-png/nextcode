@@ -45,7 +45,7 @@ describe("semif backend", () => {
     expect(amdHipUnsupported(inventory, {}, "win32", "x64")).toBe(true)
   })
 
-  test("known unsupported gfx settles before HIP fetch on win32", () => {
+  test("auto gfx803 without a vulkan launcher stays cpu, not gpu_unsupported", () => {
     if (!hipPlatformSupported()) return
     const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gpu-unsupported-"))
     const triple = hostTarget()
@@ -60,15 +60,22 @@ describe("semif backend", () => {
         env: { [SERVER_ENV]: cpu },
         inventory,
         rocmRuntimePresent: true,
-        hipFetching: true,
       })
-      if (process.platform === "win32") {
-        expect(status.active).toBe("cpu")
-        expect(status.fallbackReason).toBe("gpu_unsupported")
-        expect(status.message).toContain("gfx803")
-        return
-      }
+      expect(status.active).toBe("cpu")
       expect(status.fallbackReason).not.toBe("gpu_unsupported")
+      expect(status.fallbackReason).toBe("no_vendored_binary")
+
+      const fetching = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory,
+        rocmRuntimePresent: true,
+        vulkanFetching: true,
+      })
+      expect(fetching.active).toBe("cpu")
+      expect(fetching.fallbackReason).not.toBe("gpu_unsupported")
+      expect(fetching.message).toContain("Vulkan")
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

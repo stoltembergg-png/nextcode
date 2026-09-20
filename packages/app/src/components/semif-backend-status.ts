@@ -35,11 +35,18 @@ export function semifVulkanFetchInProgress(status: SemifStatus | undefined) {
   return false
 }
 
+function semifVulkanFetchMessage(status: SemifStatus | undefined) {
+  return Boolean(status?.backendMessage?.includes("Vulkan"))
+}
+
 export function semifBackendDisplayState(status: SemifStatus | undefined): SemifBackendDisplayState | undefined {
   if (!status) return undefined
   if (status.systemRuntimeMissing) return "system_runtime_missing"
-  if (semifHipFetchInProgress(status)) return "hip_fetch_in_progress"
-  if (semifVulkanFetchInProgress(status)) return "vulkan_fetch_in_progress"
+  const hipFetch = semifHipFetchInProgress(status)
+  const vulkanFetch = semifVulkanFetchInProgress(status)
+  if (vulkanFetch && (semifVulkanFetchMessage(status) || !hipFetch)) return "vulkan_fetch_in_progress"
+  if (hipFetch) return "hip_fetch_in_progress"
+  if (vulkanFetch) return "vulkan_fetch_in_progress"
   if (status.backend === "hip" && !status.backendFallback) return "hip_active"
   if (status.backend === "vulkan" && !status.backendFallback) return "vulkan_active"
   if (status.backendFallbackReason === "gpu_unsupported") return "gpu_unsupported"
@@ -47,8 +54,14 @@ export function semifBackendDisplayState(status: SemifStatus | undefined): Semif
   return undefined
 }
 
-export function semifBackendFallbackI18nKey(reason?: SemifBackendFallbackReason): string {
+export function semifBackendFallbackI18nKey(reason?: SemifBackendFallbackReason, status?: SemifStatus): string {
   if (!reason) return "semif.backend.fallback.unknown"
+  if (
+    reason === "no_vendored_binary" &&
+    (status?.backendRequested === "vulkan" || (status?.backendRequested === "auto" && status.backend !== "hip"))
+  ) {
+    return "semif.backend.fallback.no_vendored_binary_vulkan"
+  }
   return `semif.backend.fallback.${reason}`
 }
 
@@ -66,11 +79,17 @@ export function semifBackendDotClass(state: SemifBackendDisplayState | undefined
 }
 
 export function semifBackendMessageKey(status: SemifStatus | undefined) {
-  if (semifHipFetchInProgress(status)) {
+  const hipFetch = semifHipFetchInProgress(status)
+  const vulkanFetch = semifVulkanFetchInProgress(status)
+  if (vulkanFetch && (semifVulkanFetchMessage(status) || !hipFetch)) {
+    if (status?.status === "verifying") return "semif.backend.vulkan_verifying"
+    return "semif.backend.vulkan_downloading"
+  }
+  if (hipFetch) {
     if (status?.status === "verifying") return "semif.backend.hip_verifying"
     return "semif.backend.hip_downloading"
   }
-  if (semifVulkanFetchInProgress(status)) {
+  if (vulkanFetch) {
     if (status?.status === "verifying") return "semif.backend.vulkan_verifying"
     return "semif.backend.vulkan_downloading"
   }
@@ -79,17 +98,23 @@ export function semifBackendMessageKey(status: SemifStatus | undefined) {
   if (state === "vulkan_active") return "semif.backend.vulkan_active"
   if (state === "system_runtime_missing") return "semif.backend.system_runtime_missing"
   if (state === "gpu_unsupported") return semifBackendFallbackI18nKey("gpu_unsupported")
-  if (state === "cpu_fallback") return semifBackendFallbackI18nKey(status?.backendFallbackReason)
+  if (state === "cpu_fallback") return semifBackendFallbackI18nKey(status?.backendFallbackReason, status)
   return undefined
 }
 
 export function semifLifecycleStatusKey(status: SemifStatus | undefined) {
   if (!status) return undefined
-  if (semifHipFetchInProgress(status)) {
+  const hipFetch = semifHipFetchInProgress(status)
+  const vulkanFetch = semifVulkanFetchInProgress(status)
+  if (vulkanFetch && (semifVulkanFetchMessage(status) || !hipFetch)) {
+    if (status.status === "verifying") return "semif.state.verifying_vulkan_runtime"
+    return "semif.state.downloading_vulkan_runtime"
+  }
+  if (hipFetch) {
     if (status.status === "verifying") return "semif.state.verifying_hip_runtime"
     return "semif.state.downloading_hip_runtime"
   }
-  if (semifVulkanFetchInProgress(status)) {
+  if (vulkanFetch) {
     if (status.status === "verifying") return "semif.state.verifying_vulkan_runtime"
     return "semif.state.downloading_vulkan_runtime"
   }

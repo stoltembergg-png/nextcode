@@ -18,13 +18,12 @@ import {
 } from "../../script/fetch-semif-server"
 import { SemifAcquire, type DownloadPolicy, type Progress } from "./acquire"
 import {
-  amdGpuUnsupportedForWinHip,
+  amdHipUnsupported,
   hipPlatformSupported,
   readGpuInventory,
   vendoredBinaryExists,
   type BackendPreference,
 } from "./backend"
-import { unsupportedGfx } from "./gfx"
 import { SemifPaths } from "./paths"
 
 const MARKER_NAME = ".hip-runtime.json"
@@ -101,9 +100,8 @@ export function shouldFetch(input: {
   if (input.requested === "auto" && inventory.amd && inventory.nvidia) return false
   if (input.requested === "auto" && !inventory.amd) return false
   if (input.requested === "hip" && !inventory.amd) return false
-  if (amdGpuUnsupportedForWinHip(inventory)) return false
   const env = input.env ?? process.env
-  if (unsupportedGfx(env)) return false
+  if (amdHipUnsupported(inventory, env)) return false
   return !vendoredBinaryExists("hip", input.serverPath, env)
 }
 

@@ -226,10 +226,33 @@ describe("semifBackendMessageKey", () => {
       semifBackendMessageKey({
         ...base(),
         status: "offline",
+        backendRequested: "hip",
         backendFallback: true,
         backendFallbackReason: "no_vendored_binary",
       }),
     ).toBe("semif.backend.fallback.no_vendored_binary")
+  })
+
+  test("selects Vulkan vendored-binary copy for auto idle CPU fallback", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        status: "offline",
+        backend: "cpu",
+        backendRequested: "auto",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.fallback.no_vendored_binary_vulkan")
+    expect(
+      semifBackendFallbackI18nKey("no_vendored_binary", {
+        ...base(),
+        backend: "cpu",
+        backendRequested: "vulkan",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.fallback.no_vendored_binary_vulkan")
   })
 
   test("selects fallback reason copy for HIP download failure", () => {
@@ -319,6 +342,22 @@ describe("semifVulkanFetchInProgress", () => {
         backendFallback: false,
       }),
     ).toBe(true)
+  })
+
+  test("auto Vulkan warmup copy wins over HIP when the fetch message is Vulkan", () => {
+    const snapshot = {
+      ...base(),
+      status: "downloading" as const,
+      backend: "cpu" as const,
+      backendRequested: "auto" as const,
+      backendFallback: false,
+      backendMessage: "semif: fetching Vulkan runtime",
+    }
+    expect(semifHipFetchInProgress(snapshot)).toBe(true)
+    expect(semifVulkanFetchInProgress(snapshot)).toBe(true)
+    expect(semifBackendDisplayState(snapshot)).toBe("vulkan_fetch_in_progress")
+    expect(semifBackendMessageKey(snapshot)).toBe("semif.backend.vulkan_downloading")
+    expect(semifLifecycleStatusKey(snapshot)).toBe("semif.state.downloading_vulkan_runtime")
   })
 
   test("gpu_unsupported hip fetch is still skipped", () => {
