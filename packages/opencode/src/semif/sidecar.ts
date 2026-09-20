@@ -32,6 +32,30 @@ export interface SidecarConfig {
   readonly serverPath: string
   readonly modelPath: string
   readonly env?: Record<string, string>
+  readonly nGpuLayers?: number
+}
+
+export function sidecarArgs(config: SidecarConfig, port: number): string[] {
+  const args = [
+    "-m",
+    config.modelPath,
+    "--host",
+    config.host,
+    "--port",
+    String(port),
+    "--threads",
+    String(config.threads),
+    "-c",
+    String(config.contextSize),
+    "--no-webui",
+    // Two slots lets a status poll overlap a decision without doubling the KV arena.
+    "--parallel",
+    "2",
+  ]
+  if (config.nGpuLayers !== undefined) {
+    args.push("-ngl", String(config.nGpuLayers))
+  }
+  return args
 }
 
 export interface Handle {
@@ -118,22 +142,7 @@ const locate = (config: SidecarConfig): Effect.Effect<Location, SidecarError, Ht
 const command = (config: SidecarConfig, port: number) =>
   ChildProcess.make(
     config.serverPath,
-    [
-      "-m",
-      config.modelPath,
-      "--host",
-      config.host,
-      "--port",
-      String(port),
-      "--threads",
-      String(config.threads),
-      "-c",
-      String(config.contextSize),
-      "--no-webui",
-      // Two slots lets a status poll overlap a decision without doubling the KV arena.
-      "--parallel",
-      "2",
-    ],
+    sidecarArgs(config, port),
     {
       cwd: path.dirname(config.serverPath),
       env: config.env,

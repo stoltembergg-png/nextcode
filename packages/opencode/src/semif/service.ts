@@ -489,6 +489,8 @@ const layer = Layer.effect(
           loadTimeoutMs: refreshed.resolved.loadTimeoutMs,
           serverPath: runtime.serverPath,
           modelPath: refreshed.modelPath,
+          nGpuLayers:
+            refreshed.backend.active === "hip" || refreshed.backend.active === "vulkan" ? 99 : undefined,
           env:
             rocm?.rocblasLibraryDir
               ? { ROCBLAS_TENSILE_LIBPATH: rocm.rocblasLibraryDir }
