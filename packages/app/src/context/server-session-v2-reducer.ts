@@ -269,7 +269,6 @@ export function createV2SessionReducer() {
           ...tool,
           executed: event.data.executed,
           providerState: event.data.state,
-          // structured: {}, content: []
           state: { status: "running", input: event.data.input, metadata: {} },
           time: { ...tool.time, ran: event.created },
         }))
@@ -278,7 +277,6 @@ export function createV2SessionReducer() {
           tool.state.status === "running"
             ? {
                 ...tool,
-                // state: { ...tool.state, structured: event.data.structured, content: event.data.content },
                 state: { ...tool.state, metadata: event.data.metadata },
               }
             : tool,
@@ -293,10 +291,8 @@ export function createV2SessionReducer() {
             state: {
               status: "completed",
               input: tool.state.input,
-              // structured: event.data.structured,
-              metadata: event.data.metadata,
+              metadata: event.data.metadata ?? (tool.state.status === "running" ? tool.state.metadata : {}),
               content: event.data.content,
-              // result: event.data.result,
             },
             time: { ...tool.time, completed: event.created },
           }
@@ -311,11 +307,9 @@ export function createV2SessionReducer() {
             state: {
               status: "error",
               input: typeof tool.state.input === "string" ? {} : tool.state.input,
-              // structured: tool.state.status === "running" ? tool.state.structured : {},
               metadata: event.data.metadata ?? (tool.state.status === "running" ? tool.state.metadata : {}),
               content: event.data.content,
               error: event.data.error,
-              // result: event.data.result,
             },
             time: { ...tool.time, completed: event.created },
           }

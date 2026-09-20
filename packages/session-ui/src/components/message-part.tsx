@@ -76,6 +76,7 @@ import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
+import { omoDelegateView, type OmoDelegateSource } from "./omo-delegate"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -474,6 +475,11 @@ function webSearchProviderLabel(provider: unknown, i18n: ReturnType<typeof useI1
   const name = provider === "parallel" ? "Parallel" : provider === "exa" ? "Exa" : undefined
   if (name) return i18n.t("ui.tool.websearch.provider", { provider: name })
   return i18n.t("ui.tool.websearch")
+}
+
+function sourceLabel(source: OmoDelegateSource | undefined, i18n: ReturnType<typeof useI18n>) {
+  if (!source) return undefined
+  return i18n.t(`ui.tool.omo_delegate.source.${source}` as const)
 }
 
 export function getToolInfo(
@@ -2041,6 +2047,87 @@ ToolRegistry.register({
       >
         <ExaOutput output={props.output} />
       </BasicTool>
+    )
+  },
+})
+
+ToolRegistry.register({
+  name: "omo_delegate",
+  render(props) {
+    const data = useData()
+    const i18n = useI18n()
+    const view = createMemo(() => omoDelegateView(props.metadata, props.status))
+    const agent = createMemo(() => taskAgent(view().agent, data.store.agent))
+    const childHref = createMemo(() => sessionLink(view().childID, data.sessionHref))
+    const clickable = createMemo(() => !!(view().childID && (data.navigateToSession || childHref())))
+    const title = createMemo(() => {
+      const name = agent().name
+      if (name) return i18n.t("ui.tool.agent", { type: name })
+      return i18n.t("ui.tool.omo_delegate")
+    })
+    const source = createMemo(() => sourceLabel(view().source, i18n))
+    const state = createMemo(() => i18n.t(`ui.tool.omo_delegate.state.${view().state}` as const))
+    const subtitle = createMemo(() => {
+      const mode = i18n.t(
+        view().background ? "ui.tool.omo_delegate.mode.background" : "ui.tool.omo_delegate.mode.foreground",
+      )
+      const verificationValue = view().verification
+      const verification = verificationValue
+        ? i18n.t("ui.tool.omo_delegate.verification", { value: verificationValue })
+        : undefined
+      const sourceValue = source()
+      const provenance = sourceValue
+        ? i18n.t("ui.tool.omo_delegate.provenance", { value: sourceValue })
+        : undefined
+      const fallbackValue = view().fallbackReason
+      const fallbackReason = fallbackValue
+        ? i18n.t("ui.tool.omo_delegate.fallback", { value: fallbackValue })
+        : undefined
+      const downgradedValue = view().downgraded
+      const downgraded = downgradedValue
+        ? i18n.t("ui.tool.omo_delegate.downgraded", { value: downgradedValue })
+        : undefined
+      const values = [mode, state(), verification, provenance, fallbackReason, downgraded]
+      return values.filter((value): value is string => !!value).join(" · ")
+    })
+    const args = createMemo(() => {
+      const childID = view().childID
+      if (!childID) return undefined
+      return [i18n.t("ui.tool.omo_delegate.child", { id: childID })]
+    })
+
+    const open = () => {
+      const id = view().childID
+      if (!id) return
+      data.navigateToSession?.(id)
+    }
+
+    const navigate = (event: MouseEvent) => {
+      if (!data.navigateToSession) return
+      if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      event.preventDefault()
+      open()
+    }
+    const navigateKey = (event: KeyboardEvent) => {
+      if (!clickable()) return
+      if (event.key !== "Enter" && event.key !== " ") return
+      if (childHref()) return
+      event.preventDefault()
+      open()
+    }
+
+    return (
+      <BasicTool
+        icon="task"
+        status={props.status}
+        trigger={{ title: title(), subtitle: subtitle(), args: args() }}
+        hideDetails
+        triggerAsLink
+        triggerHref={childHref()}
+        clickable={clickable()}
+        onTriggerClick={navigate}
+        onTriggerKeyDown={navigateKey}
+      />
     )
   },
 })

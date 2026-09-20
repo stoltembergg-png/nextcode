@@ -38,6 +38,7 @@ import {
   semifBackendMessageKey,
   semifLifecycleStatusKey,
 } from "@/components/semif-backend-status"
+import { OmoStatusSection } from "@/components/omo-status"
 
 const pluginEmptyMessage = (value: string, file: string): JSXElement => {
   const parts = value.split(file)
@@ -362,6 +363,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
   const semifQuery = useQuery(() => ({
     ...queryOptions().semif(),
   }))
+  const omoQuery = useQuery(() => ({
+    ...queryOptions().omo(),
+  }))
   const semifStatus = () => semifQuery.data
   const semifAvailable = () => semifStatus() !== undefined
   const semifMode = createMemo<SemifMode>(() => semifOptimistic() ?? semifStatus()?.mode ?? "auto")
@@ -469,6 +473,9 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
               <span class={`size-1.5 rounded-full shrink-0 ${semifDotClass(semifAvailable() ? semifStatus() : undefined)}`} />
               {language.t("status.popover.tab.semif")}
             </span>
+          </Tabs.Trigger>
+          <Tabs.Trigger value="omo" data-slot="tab" class="text-12-regular">
+            {language.t("status.popover.tab.omo")}
           </Tabs.Trigger>
           <Show when={protocol() === "v1"}>
             <Tabs.Trigger value="plugins" data-slot="tab" class="text-12-regular">
@@ -831,6 +838,14 @@ export function StatusPopoverBody(props: { shown: Accessor<boolean> }) {
               </Show>
             </div>
           </div>
+        </Tabs.Content>
+
+        <Tabs.Content value="omo">
+          <OmoStatusSection
+            status={() => omoQuery.data}
+            loading={() => omoQuery.isPending}
+            failed={() => omoQuery.isError}
+          />
         </Tabs.Content>
 
         <Show when={protocol() === "v1"}>
