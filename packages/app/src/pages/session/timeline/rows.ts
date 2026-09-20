@@ -204,13 +204,7 @@ export namespace Timeline {
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
           reasoningHeading: heading,
-          routingActivity: routingActivities
-            .filter(
-              (activity) =>
-                activity.sessionID === userMessage.sessionID &&
-                (assistantMessages.length === 0 || assistantMessages.some((message) => message.id === activity.assistantMessageID)),
-            )
-            .sort((a, b) => b.updatedAt - a.updatedAt)[0],
+          routingActivity: latestRoutingActivity(routingActivities, userMessage, assistantMessages),
         }),
       )
     }
@@ -267,6 +261,20 @@ export namespace Timeline {
       const value = cleanHeading(strong[1])
       if (value) return value
     }
+  }
+
+  function latestRoutingActivity(
+    routingActivities: readonly OmoRoutingEvent.OmoRoutingActivity[],
+    userMessage: UserMessage,
+    assistantMessages: AssistantMessage[],
+  ) {
+    const assistantMessageIDs = new Set(assistantMessages.map((message) => message.id))
+    return routingActivities.reduce<OmoRoutingEvent.OmoRoutingActivity | undefined>((latest, activity) => {
+      if (activity.sessionID !== userMessage.sessionID || activity.state.phase === "cleared") return latest
+      if (!latest || activity.updatedAt > latest.updatedAt) return activity
+      if (activity.updatedAt < latest.updatedAt) return latest
+      return assistantMessageIDs.has(activity.assistantMessageID) ? activity : latest
+    }, undefined)
   }
 
   function cleanHeading(value: string) {

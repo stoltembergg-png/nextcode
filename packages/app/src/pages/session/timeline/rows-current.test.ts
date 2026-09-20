@@ -48,8 +48,47 @@ describe("current session timeline rows", () => {
         activity(1, "msg_assistant", "call_old"),
         activity(3, "msg_assistant", "call_new"),
         activity(4, "msg_assistant", "call_other_session", "ses_2"),
-        activity(5, "msg_other", "call_other"),
       ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_new")
+  })
+
+  test("falls back to a newer unprojected assistant activity on the active final turn", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "route", time: { created: 1 } },
+      {
+        id: "msg_assistant_old",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [],
+        time: { created: 2 },
+      },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const activity = (updatedAt: number, assistantMessageID: string, toolCallID: string) =>
+      ({
+        sessionID: "ses_1",
+        assistantMessageID,
+        toolCallID,
+        sequence: 0,
+        startedAt: 0,
+        updatedAt,
+        state: { phase: "analyzing" },
+      }) as OmoRoutingEvent.OmoRoutingActivity
+
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [activity(1, "msg_assistant_old", "call_old"), activity(2, "msg_assistant_new", "call_new")],
     )
 
     const thinking = result.rows.find((row) => row._tag === "Thinking")
