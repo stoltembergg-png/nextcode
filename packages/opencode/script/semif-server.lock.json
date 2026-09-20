@@ -30,6 +30,16 @@
       "asset": "llama-b11040-bin-ubuntu-rocm-10.0-x64.tar.gz",
       "bytes": 239071458,
       "sha256": "6064453cf71fa1bddb864ba57ad8dd616a7dbe07a2aab5938f6253ac024a0165"
+    },
+    "x86_64-pc-windows-msvc-vulkan": {
+      "asset": "llama-b11040-bin-win-vulkan-x64.zip",
+      "bytes": 31821107,
+      "sha256": "1f71a94bb3b7f615f110b0db5721618535feccff0b3fb0aba9b98c507e751b62"
+    },
+    "x86_64-unknown-linux-gnu-vulkan": {
+      "asset": "llama-b11040-bin-ubuntu-vulkan-x64.tar.gz",
+      "bytes": 30363623,
+      "sha256": "f4d1a82e8d8b720e53f237067aa39641bee887d17dc1ffbc8e2e316a3e0aa757"
     }
   }
 }
