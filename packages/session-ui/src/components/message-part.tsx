@@ -1900,7 +1900,13 @@ ToolRegistry.register({
       >
         <Show when={props.output}>
           {(output) => (
-            <div data-component="tool-output" data-scrollable>
+            <div
+              data-component="tool-output"
+              data-scrollable
+              tabIndex={0}
+              role="region"
+              aria-label={i18n.t("ui.scrollView.ariaLabel")}
+            >
               <SemifOutput output={output()} />
             </div>
           )}
