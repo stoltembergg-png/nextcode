@@ -28,6 +28,11 @@ describe("deterministic OMO routing", () => {
     expect(result.source).toBe("deterministic")
   })
 
+  test("classifies UI implementation as design work and plain implementation as code work", () => {
+    expect(routeDeterministic({ summary: "UI implementation for the settings screen", strategies }).agent).toBe("designer")
+    expect(routeDeterministic({ summary: "implementation of the bounded parser change", strategies }).agent).toBe("fixer")
+  })
+
   test("uses a stable fallback order for mixed or unknown work", () => {
     const input = { summary: "Handle this general task", strategies }
     expect(routeDeterministic(input).id).toBe(routeDeterministic(input).id)
@@ -72,6 +77,15 @@ describe("deterministic OMO routing", () => {
     expect(result.fallbackReason).not.toContain("\n")
     expect(result.fallbackReason!.length).toBeLessThanOrEqual(160)
     expect(result.fallbackReason).not.toContain("/private/path")
+  })
+
+  test("bounds the summary and each evidence item before tokenization", () => {
+    const summary = `${"x".repeat(10_000)} UI implementation`
+    const evidence = [`${"y".repeat(10_000)} screenshot`, "implementation"]
+    const result = routeDeterministic({ summary, evidence, strategies })
+
+    expect(result.agent).toBe("fixer")
+    expect(result.id).toBe(routeDeterministic({ summary, evidence, strategies }).id)
   })
 
   test("respects explicit field constraints when alternatives contain them", () => {

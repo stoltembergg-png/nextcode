@@ -31,23 +31,55 @@ export type DeterministicRoutingResult = Readonly<{
   readonly fallbackReason: string
 }>
 
-const MAX_SIGNAL_LENGTH = 512
+const MAX_SUMMARY_LENGTH = 512
+const MAX_EVIDENCE_LENGTH = 512
 const MAX_EVIDENCE_ITEMS = 16
+const MAX_SIGNAL_TEXT_LENGTH = MAX_SUMMARY_LENGTH + MAX_EVIDENCE_ITEMS * (MAX_EVIDENCE_LENGTH + 1)
+const MAX_SIGNAL_TOKENS = 512
 const MAX_REASON_LENGTH = 160
 
-const signals: Readonly<Record<AgentID, readonly string[]>> = {
-  orchestrator: ["orchestrate", "orchestration", "coordinate", "workflow", "delegat"],
-  explore: ["repository", "repo", "codebase", "discover", "explore", "inspect", "find", "search", "file", "files", "structure", "map", "arquiv", "estrutura", "mape"],
-  librarian: ["documentation", "document", "docs", "dependency", "dependencies", "package", "library", "research", "reference", "official", "npm", "api", "documenta", "dependencia", "biblioteca", "pesquis"],
-  oracle: ["architecture", "architect", "diagnos", "review", "audit", "tradeoff", "design", "reason", "cause", "risk", "arquitetura", "diagnost", "revis", "analise", "analis"],
-  designer: ["visual", "ui", "ux", "frontend", "interface", "layout", "style", "styling", "css", "component", "screen", "design", "visual", "tela", "estilo"],
-  fixer: ["implement", "implementation", "fix", "bug", "change", "code", "coding", "test", "tests", "refactor", "patch", "edit", "write", "corrig", "implementar", "alterar", "codigo", "teste"],
-  observer: ["image", "images", "screenshot", "pdf", "diagram", "media", "picture", "evidence", "visual", "imagem", "figura", "captura", "evidencia"],
+type SemanticSignalGroup = {
+  readonly key: string
+  readonly terms: readonly string[]
+  readonly weight: number
+}
+
+const semanticSignals: Readonly<Record<AgentID, readonly SemanticSignalGroup[]>> = {
+  orchestrator: [
+    { key: "coordination", terms: ["orchestrate", "orchestration", "coordinate", "workflow", "delegate", "delegates", "delegation"], weight: 120 },
+  ],
+  explore: [
+    { key: "repository", terms: ["repository", "repo", "codebase", "structure", "arquivo", "arquivos", "estrutura", "mapear", "mapeamento"], weight: 120 },
+    { key: "discovery", terms: ["discover", "explore", "inspect", "find", "search", "file", "files", "map"], weight: 100 },
+  ],
+  librarian: [
+    { key: "research", terms: ["research", "reference", "official", "npm", "api", "documentacao", "documentar", "biblioteca", "pesquisa", "pesquisar"], weight: 130 },
+    { key: "documentation", terms: ["documentation", "document", "docs"], weight: 110 },
+    { key: "dependency", terms: ["dependency", "dependencies", "package", "library", "dependencia"], weight: 120 },
+  ],
+  oracle: [
+    { key: "architecture", terms: ["architecture", "architect", "arquitetura"], weight: 140 },
+    { key: "diagnosis", terms: ["diagnosis", "diagnose", "diagnostic", "reason", "cause", "risk", "diagnostico", "diagnosticar", "analise", "analisar"], weight: 120 },
+    { key: "review", terms: ["review", "audit", "tradeoff", "tradeoffs", "revisao", "revisar"], weight: 100 },
+  ],
+  designer: [
+    { key: "ui", terms: ["ui", "ux", "frontend", "interface", "layout", "css", "component", "screen", "tela"], weight: 180 },
+    { key: "visual-design", terms: ["visual", "style", "styling", "design", "estilo"], weight: 120 },
+    { key: "implementation", terms: ["implement", "implementation", "implementing", "implementar"], weight: 40 },
+  ],
+  fixer: [
+    { key: "implementation", terms: ["implement", "implementation", "implementing", "implementar", "code", "coding", "patch", "edit", "write", "change", "refactor", "alterar", "codigo"], weight: 130 },
+    { key: "defect", terms: ["fix", "bug", "error", "failure", "corrigir", "correcao"], weight: 120 },
+    { key: "testing", terms: ["test", "tests", "testing", "spec", "suite", "coverage", "teste", "testes", "cobertura"], weight: 60 },
+  ],
+  observer: [
+    { key: "visual-evidence", terms: ["image", "images", "screenshot", "pdf", "diagram", "media", "picture", "evidence", "imagem", "figura", "captura", "evidencia"], weight: 220 },
+  ],
 }
 
 const verificationSignals: Readonly<Record<Exclude<Verification, "none">, readonly string[]>> = {
   tests: ["test", "tests", "testing", "spec", "suite", "coverage", "teste", "testes", "cobertura"],
-  oracle: ["architecture", "architect", "diagnos", "review", "audit", "tradeoff", "risk", "arquitetura", "diagnost", "revis", "analise", "analis"],
+  oracle: ["architecture", "architect", "diagnosis", "diagnose", "diagnostic", "review", "audit", "tradeoff", "tradeoffs", "risk", "arquitetura", "diagnostico", "diagnosticar", "revisao", "revisar", "analise", "analisar"],
   observer: ["image", "images", "screenshot", "pdf", "diagram", "media", "picture", "visual", "evidence", "imagem", "figura", "captura", "evidencia"],
 }
 
@@ -58,7 +90,12 @@ export function routeDeterministic(input: DeterministicRoutingInput): Determinis
   const eligible = input.strategies.filter((strategy) => matchesOverrides(strategy, input.explicit))
   if (eligible.length === 0) throw new StrategyRoutingError()
 
-  const words = tokenize([input.summary, ...(input.evidence ?? []).slice(0, MAX_EVIDENCE_ITEMS)].join(" "))
+  const words = tokenize(
+    [
+      input.summary.slice(0, MAX_SUMMARY_LENGTH),
+      ...(input.evidence ?? []).slice(0, MAX_EVIDENCE_ITEMS).map((item) => item.slice(0, MAX_EVIDENCE_LENGTH)),
+    ].join(" "),
+  )
   const independent = input.independent ?? hasAny(words, independentSignals)
   const ranked = eligible
     .map((strategy, index) => ({ strategy, index, score: scoreStrategy(strategy, words, independent, input.backgroundPreference) }))
@@ -103,10 +140,16 @@ function scoreStrategy(
 }
 
 function agentScore(agent: AgentID, words: ReadonlySet<string>) {
-  const matches = signals[agent].filter((signal) => hasSignal(words, signal)).length
-  if (matches === 0) return 0
-  const visualBoost = agent === "observer" && hasAny(words, verificationSignals.observer) ? 16 : 0
-  return matches * 100 + visualBoost
+  return scoreSemanticSignals(semanticSignals[agent], words)
+}
+
+function scoreSemanticSignals(groups: readonly SemanticSignalGroup[], words: ReadonlySet<string>) {
+  const counted = new Set<string>()
+  return groups.reduce((score, group) => {
+    if (counted.has(group.key) || !hasAny(words, group.terms)) return score
+    counted.add(group.key)
+    return score + group.weight
+  }, 0)
 }
 
 function verificationScore(verification: Verification, words: ReadonlySet<string>) {
@@ -127,12 +170,12 @@ function executionScore(
 }
 
 function tokenize(input: string) {
-  const bounded = input.slice(0, MAX_SIGNAL_LENGTH * (MAX_EVIDENCE_ITEMS + 1))
+  const bounded = input.slice(0, MAX_SIGNAL_TEXT_LENGTH)
   const normalized = bounded
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-  return new Set(normalized.split(/[^a-z0-9]+/).filter(Boolean).slice(0, MAX_SIGNAL_LENGTH))
+  return new Set(normalized.split(/[^a-z0-9]+/).filter(Boolean).slice(0, MAX_SIGNAL_TOKENS))
 }
 
 function hasAny(words: ReadonlySet<string>, candidates: readonly string[]) {
@@ -140,8 +183,7 @@ function hasAny(words: ReadonlySet<string>, candidates: readonly string[]) {
 }
 
 function hasSignal(words: ReadonlySet<string>, candidate: string) {
-  if (candidate.length < 4) return words.has(candidate)
-  return [...words].some((word) => word === candidate || word.startsWith(candidate))
+  return words.has(candidate)
 }
 
 function finiteScore(value: number) {
