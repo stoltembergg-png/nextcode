@@ -1,7 +1,8 @@
 # OMO E2E and implementation review
 
-Review date: 2026-09-20  
-Branch: `native-omo`  
+Review date: 2026-09-20
+
+Branch: `native-omo`
 Scope: the native OMO routing and conflict stories added in Task 12, plus
 their server fixtures and the runtime boundaries exercised by those stories.
 
@@ -10,7 +11,7 @@ their server fixtures and the runtime boundaries exercised by those stories.
 | Check | `omo-routing-flow.spec.ts` | `omo-conflict.spec.ts` | Evidence |
 | --- | --- | --- | --- |
 | Isolated, uniquely named fixture data | pass | pass | Dedicated directory, project, session, message, child, and call IDs per story. |
-| User-facing locators | pass | pass | `getByRole` is used for buttons, tabs, headings, links, and status cards. |
+| User-facing locators | pass | pass | `getByRole` is used for actionable controls; OMO status containers use exact `data-component` selectors because they have no semantic role. |
 | Locator uniqueness | pass | pass | Exact tab names and exact status attributes are used; cards include agent/state identity. |
 | Actionability and auto-wait | pass | pass | Actions are followed by web-first assertions; no manual polling is used. |
 | Web-first assertions | pass | pass | Assertions use `toBeVisible`, `toHaveAttribute`, `toContainText`, and `toHaveURL`. |
@@ -46,7 +47,7 @@ conflict-state assertions.
 
 | Failure mode | Result | Direct evidence |
 | --- | --- | --- |
-| Native operation with the legacy plugin disabled | pass | `packages/opencode/src/omo/application-tools.ts` gates native registration on native config and exact legacy conflict detection; Task 13 packaged smoke reports native agents and no external plugin. |
+| Native operation with the legacy plugin disabled | pass | `packages/opencode/src/omo/delegate-tool.ts` gates native registration on native config and exact legacy conflict detection; Task 13 packaged smoke reports native agents and no external plugin. |
 | SemIf non-ready fallback is immediate and deterministic | pass | `packages/opencode/src/omo/router.ts` selects the deterministic strategy when SemIf is unavailable; `packages/opencode/test/omo/router.test.ts` covers unavailable, timeout, cancellation, malformed, missing-slot, and ineligible answers. |
 | V2 durable prompt admission without a `SessionRunner` bridge | pass | `packages/opencode/src/omo/delegation.ts` calls `SessionV2.prompt(..., { resume: false })` and resumes through the V2 execution service; no `SessionRunner` import exists under `packages/opencode/src/omo`. |
 | Migration backup and exact plugin removal | pass | `packages/opencode/src/omo/migrate.ts` creates an exact-byte backup before atomic replacement and removes only the exact `oh-my-opencode-slim` entry; migration tests cover similar paths and refusal cases. |
@@ -64,4 +65,3 @@ model workflow is separately required to redact prompts, secrets, and local
 paths before artifact upload.
 
 No additional defect or regression test was required by this review.
-
