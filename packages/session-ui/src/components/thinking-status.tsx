@@ -20,10 +20,21 @@ function compactNumber(value: number, locale: string) {
   return formatter.format(value)
 }
 
+export function formatElapsed(startedAt: number | undefined, now: number, locale: string) {
+  if (startedAt === undefined) return ""
+  const elapsed = Math.max(0, now - startedAt)
+  if (elapsed < 1_000) return ""
+  const seconds = Math.floor(elapsed / 100) / 10
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(seconds)}s`
+}
+
 export function ThinkingStatus(props: {
   active: boolean
   pendingMessage: AssistantMessage | undefined
   parts: readonly { type: string; tool?: string }[]
+  label?: string
+  startedAt?: number
+  details?: "all" | "elapsed"
 }) {
   const i18n = useI18n()
   const [tick, setTick] = createSignal(0)
@@ -31,14 +42,14 @@ export function ThinkingStatus(props: {
 
   createEffect(
     on(
-      () => props.active,
-      (isActive) => {
+      () => [props.active, props.details] as const,
+      ([isActive, details]) => {
         if (timer) {
           clearInterval(timer)
           timer = undefined
         }
         if (!isActive) return
-        timer = setInterval(() => setTick((value) => value + 1), 1000)
+        timer = setInterval(() => setTick((value) => value + 1), details === "elapsed" ? 100 : 1000)
       },
     ),
   )
@@ -72,6 +83,11 @@ export function ThinkingStatus(props: {
     return diff > 0 ? Math.floor(diff / 1000) : 0
   })
 
+  const elapsedLabel = createMemo(() => {
+    tick()
+    return formatElapsed(props.startedAt ?? props.pendingMessage?.time.created, Date.now(), i18n.locale())
+  })
+
   const tokensLabel = createMemo(() => {
     const value = tokens()
     if (value <= 0) return ""
@@ -81,14 +97,22 @@ export function ThinkingStatus(props: {
   const showDecisions = createMemo(() => decisions() > 0)
   const showTokens = createMemo(() => tokensLabel().length > 0)
   const showElapsed = createMemo(() => elapsed() > 0)
+  const showElapsedOnly = createMemo(() => props.details === "elapsed" && elapsedLabel().length > 0)
 
   return (
     <div data-slot="thinking-status" data-active={props.active ? "true" : "false"}>
-      <span data-slot="thinking-status-label">
-        <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} active={props.active} />
+      <span data-slot="thinking-status-label" aria-live="polite">
+        <TextShimmer text={props.label ?? i18n.t("ui.sessionTurn.status.thinking")} active={props.active} />
       </span>
       <Show when={props.active}>
         <span data-slot="thinking-status-stats" data-active="true">
+          <Show when={showElapsedOnly()}>
+            <span data-slot="thinking-status-sep" aria-hidden="true">·</span>
+            <span data-slot="thinking-status-stat-elapsed" data-active="true" aria-label={i18n.t("ui.sessionTurn.thinking.elapsed")}>
+              <span data-slot="thinking-status-stat-inner">{elapsedLabel()}</span>
+            </span>
+          </Show>
+          <Show when={props.details !== "elapsed"}>
           <Show when={showDecisions()}>
             <span data-slot="thinking-status-stat-decisions" data-active="true">
               <span data-slot="thinking-status-stat-inner">
@@ -114,6 +138,7 @@ export function ThinkingStatus(props: {
                 <span data-slot="thinking-status-stat-suffix">s</span>
               </span>
             </span>
+          </Show>
           </Show>
         </span>
       </Show>
