@@ -6,8 +6,8 @@ Platform: Windows, PowerShell, Bun 1.3.14 (x64)
 
 Branch: `native-omo`
 
-Native branch tip at evidence capture: `d03b990017` (the evidence document and
-port-matrix update are the following documentation-only commit).
+Native branch tip at evidence capture: `98d03ef1bd` (the evidence document and
+port-matrix updates are the following documentation-only commits).
 
 Upstream-sync base: `4084bc57bdc0b331fbce30a7d563ddb93ef4272c` (`chore: merge upstream dev`)
 
