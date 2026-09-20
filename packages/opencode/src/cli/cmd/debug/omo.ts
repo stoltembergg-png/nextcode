@@ -11,37 +11,39 @@ import { PermissionV2 } from "@opencode-ai/core/permission"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { SessionV2 } from "@opencode-ai/core/session"
-import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local"
+import { SessionRunner } from "@opencode-ai/core/session/runner"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
-import { BackgroundJob as CoreBackgroundJob } from "@opencode-ai/core/background-job"
-import { DateTime } from "effect"
+import { make } from "@opencode-ai/core/background-job"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { makeGlobalNode, Node } from "@opencode-ai/core/effect/app-node"
+import { makeGlobalNode, makeLocationNode, Node } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { LayerMap, Effect, Layer, Ref } from "effect"
+import { DateTime, Effect, Layer, LayerMap, Ref } from "effect"
 import { EOL } from "os"
 import { CliError, effectCmd } from "../../effect-cmd"
 import { generateStrategies } from "../../../omo/strategy"
 import { routeDeterministic } from "../../../omo/deterministic"
 import { Agent } from "../../../agent/agent"
-import { BackgroundJob } from "../../../background/job"
 import { Config } from "../../../config/config"
 import { EventV2Bridge } from "../../../event-v2-bridge"
 import { RuntimeFlags } from "../../../effect/runtime-flags"
+import { InstanceRef } from "../../../effect/instance-ref"
+import type { InstanceContext } from "../../../project/instance-context"
 import { Session } from "../../../session/session"
 import { SessionRunState } from "../../../session/run-state"
 import { SessionStatus } from "../../../session/status"
 import { DelegationService } from "../../../omo/delegation"
+import { BackgroundJob } from "../../../background/job"
 import { OmoObservability } from "../../../omo/observability"
 import { OmoRouter } from "../../../omo/router"
 import { OmoStatus } from "../../../omo/status"
 import { SemifService, type Status as SemifInfo } from "../../../semif/service"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { SessionEvent } from "@opencode-ai/core/session/event"
 
 const PARENT_ID = "ses_omo_smoke_parent"
 const FOREGROUND_CHILD_ID = "ses_omo_smoke_foreground"
@@ -251,16 +253,27 @@ export function runOmoSmokeServices() {
   process.env.SEMIF_MODE = "off"
 
   return Effect.gen(function* () {
-    const disposed = yield* Ref.make(false)
+    const scopeClosed = yield* Ref.make(false)
+    const disposalEvidence = {
+      background: yield* Ref.make(false),
+      execution: yield* Ref.make(false),
+      runner: yield* Ref.make(false),
+    }
+    const executionRef = yield* Ref.make<SessionExecution.Interface | undefined>(undefined)
+    const backgroundRef = yield* Ref.make<BackgroundJob.Interface | undefined>(undefined)
     const report = yield* Effect.scoped(
       Effect.gen(function* () {
-        yield* Effect.addFinalizer(() => Ref.set(disposed, true))
+        yield* Effect.addFinalizer(() => Ref.set(scopeClosed, true))
         const config = yield* Config.Service
         const status = yield* OmoStatus.Service
         const router = yield* OmoRouter.Service
         const delegation = yield* DelegationService.Service
         const sessions = yield* SessionV2.Service
         const background = yield* BackgroundJob.Service
+        const execution = yield* SessionExecution.Service
+        yield* Ref.set(executionRef, execution)
+        yield* Ref.set(backgroundRef, background)
+        const metadataEvents: unknown[] = []
         const currentConfig = yield* config.getGlobalReadOnly()
         const resolvedConfig = ConfigOmo.resolve(currentConfig.omo).info
         const location = Location.Ref.make({ directory: AbsolutePath.make(process.cwd().replaceAll("\\", "/")) })
@@ -292,6 +305,7 @@ export function runOmoSmokeServices() {
           model: parent.model,
           variant: parent.model?.variant,
           abort: new AbortController().signal,
+          metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
         })
         const foregroundChild = yield* sessions.get(foreground.sessionID)
         const backgroundRecommendation = yield* router.route({
@@ -304,29 +318,24 @@ export function runOmoSmokeServices() {
           background: true,
           config: resolvedConfig,
         })
-        const backgroundChild = yield* sessions.createChild({
-          parentID: parent.id,
-          agent: AgentV2.ID.make(backgroundRecommendation.agent),
+        const backgroundResult = yield* delegation.delegate({
+          kind: "v2",
+          description: "OMO packaged smoke background",
+          prompt: "Run the deterministic background check.",
+          sessionID: parent.id,
+          agent: backgroundRecommendation.agent,
+          background: true,
           model: parent.model,
+          variant: parent.model?.variant,
+          abort: new AbortController().signal,
+          metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
         })
-        yield* sessions.prompt({
-          sessionID: backgroundChild.id,
-          prompt: Prompt.make({ text: "Run the deterministic background check." }),
-          resume: false,
-        })
-        const backgroundStarted = yield* background.start({
-          id: backgroundChild.id,
-          type: "omo_delegate",
-          title: "OMO packaged smoke background",
-          metadata: { parentSessionId: parent.id, sessionId: backgroundChild.id, background: true },
-          run: Effect.gen(function* () {
-            yield* sessions.resume(backgroundChild.id)
-            return yield* readSmokeV2Result(sessions, backgroundChild.id)
-          }),
-        })
-        const backgroundJob = yield* background.wait({ id: backgroundStarted.id })
+        if (!backgroundResult.background || !backgroundResult.jobID) throw new Error(errors.delegation)
+        const backgroundJob = yield* background.wait({ id: backgroundResult.jobID })
         const activeJobs = yield* background.list()
         const statusInfo = yield* status.status()
+        const backgroundChild = yield* sessions.get(backgroundResult.sessionID)
+        if (metadataEvents.length < 2) throw new Error(errors.delegation)
         return buildServiceReport({
           status: statusInfo,
           agents: statusInfo.agents,
@@ -341,15 +350,31 @@ export function runOmoSmokeServices() {
             sessionID: backgroundChild.id,
             state: backgroundJob.info?.status === "completed" ? "completed" : "error",
             background: true,
-            agent: (yield* sessions.get(backgroundChild.id)).agent,
-            started: true,
+            agent: backgroundChild.agent,
+            started: backgroundResult.state === "running",
             active_jobs: activeJobs.filter((job) => job.status === "running").length,
           },
           servicesDisposed: false,
         })
-      }),
+      }).pipe(Effect.provide(makeSmokeLayer(disposalEvidence))),
     )
-    const servicesDisposed = yield* Ref.get(disposed)
+    const servicesClosed = yield* Ref.get(scopeClosed)
+    const execution = yield* Ref.get(executionRef)
+    const background = yield* Ref.get(backgroundRef)
+    const backgroundFinalized = yield* Ref.get(disposalEvidence.background)
+    const executionFinalized = yield* Ref.get(disposalEvidence.execution)
+    const runnerFinalized = yield* Ref.get(disposalEvidence.runner)
+    const activeSessions = execution ? yield* execution.active : new Set<SessionV2.ID>()
+    const remainingJobs = background ? yield* background.list() : []
+    const servicesDisposed =
+      servicesClosed &&
+      backgroundFinalized &&
+      executionFinalized &&
+      runnerFinalized &&
+      execution !== undefined &&
+      background !== undefined &&
+      activeSessions.size === 0 &&
+      remainingJobs.every((job) => job.status !== "running")
     if (!servicesDisposed) throw new Error(errors.jobs)
     return {
       ...report,
@@ -358,16 +383,28 @@ export function runOmoSmokeServices() {
         disposal: { ...report.checks.disposal, services_disposed: servicesDisposed },
       },
     }
-  }).pipe(Effect.provide(smokeLayer))
+  })
 }
 
 export const OmoSmokeCommand = effectCmd({
   command: "omo-smoke",
   describe: "run a deterministic native OMO packaged-binary smoke test",
-  instance: true,
+  instance: false,
   builder: (yargs) => yargs.option("json", { type: "boolean", default: false }),
   handler: Effect.fn("Cli.debug.omoSmoke")(function* (args: { json?: boolean }) {
+    const directory = process.cwd()
+    const instance: InstanceContext = {
+      directory,
+      worktree: directory,
+      project: {
+        id: ProjectV2.ID.make("global"),
+        worktree: directory,
+        time: { created: 0, updated: 0 },
+        sandboxes: [],
+      },
+    }
     const report = yield* runOmoSmokeServices().pipe(
+      Effect.provideService(InstanceRef, instance),
       Effect.mapError((error) => new CliError({ message: error instanceof Error ? error.message : String(error) })),
     )
     process.stdout.write(args.json ? JSON.stringify(report) + EOL : renderText(report) + EOL)
@@ -520,9 +557,6 @@ const controlledSemif = Layer.succeed(
     dispose: () => Effect.void,
   }),
 )
-const controlledBackground = Layer.effect(BackgroundJob.Service, CoreBackgroundJob.make)
-
-const smokeLocationServices = LayerNode.group([Location.node, AgentV2.node, PermissionV2.node])
 const nativeSmokeAgentLayer = Layer.effect(
   AgentV2.Service,
   Effect.gen(function* () {
@@ -545,119 +579,136 @@ const nativeSmokeAgentLayer = Layer.effect(
     return agents
   }).pipe(Effect.provide(AgentV2.locationLayer)),
 )
-const smokeLocationMap = Layer.effect(
-  LocationServiceMap.Service,
-  LayerMap.make(
-    (ref: Location.Ref) => {
-      const location = LayerNode.hoist(smokeLocationServices, Node.tags.values.global, [
-        [Location.node, Location.boundNode(ref)],
-        [AgentV2.node, nativeSmokeAgentLayer],
-      ])
-      return LayerNode.compile(location.node).pipe(
-        Layer.provide(LayerNode.compile(location.hoisted)),
-      ) as unknown as Layer.Layer<LocationServices>
-    },
-    { idleTimeToLive: "1 minute" },
-  ),
-)
+type SmokeDisposalEvidence = {
+  readonly background: Ref.Ref<boolean>
+  readonly execution: Ref.Ref<boolean>
+  readonly runner: Ref.Ref<boolean>
+}
 
-const deterministicExecution = Layer.effect(
-  SessionExecution.Service,
-  Effect.gen(function* () {
-    const events = yield* EventV2.Service
-    const store = yield* SessionStore.Service
-    const locations = yield* LocationServiceMap.Service
-    const active = new Set<SessionV2.ID>()
-
-    const run = (sessionID: SessionV2.ID) =>
+function makeSmokeLayer(evidence: SmokeDisposalEvidence) {
+  const controlledRunnerNode = makeLocationNode({
+    service: SessionRunner.Service,
+    layer: Layer.effect(
+      SessionRunner.Service,
       Effect.gen(function* () {
-        if (active.has(sessionID)) return
-        const session = yield* store.get(sessionID)
-        if (!session) return
-        const model =
-          session.model ??
-          ModelV2.Ref.make({ providerID: ProviderV2.ID.make("controlled"), id: ModelV2.ID.make("smoke") })
-        const agent = session.agent ?? "build"
-        const assistantMessageID = SessionMessage.ID.create()
-        const textID = `text_${assistantMessageID}`
-        active.add(sessionID)
-        yield* Effect.gen(function* () {
-          const timestamp = yield* DateTime.now
-          yield* events.publish(SessionEvent.Step.Started, {
-            timestamp,
-            sessionID,
-            assistantMessageID,
-            agent,
-            model,
-          })
-          yield* events.publish(SessionEvent.Text.Started, {
-            timestamp: yield* DateTime.now,
-            sessionID,
-            assistantMessageID,
-            textID,
-          })
-          yield* events.publish(SessionEvent.Text.Ended, {
-            timestamp: yield* DateTime.now,
-            sessionID,
-            assistantMessageID,
-            textID,
-            text: "Controlled OMO smoke completed.",
-          })
-          yield* events.publish(SessionEvent.Step.Ended, {
-            timestamp: yield* DateTime.now,
-            sessionID,
-            assistantMessageID,
-            finish: "stop",
-            cost: 0,
-            tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
-          })
-        }).pipe(Effect.provide(locations.get(session.location)))
-      }).pipe(Effect.ensuring(Effect.sync(() => active.delete(sessionID))))
+        const events = yield* EventV2.Service
+        const store = yield* SessionStore.Service
+        yield* Effect.addFinalizer(() => Ref.set(evidence.runner, true))
+        return SessionRunner.Service.of({
+          run: Effect.fn("OmoSmoke.SessionRunner.run")(function* (input) {
+            const session = yield* store.get(input.sessionID)
+            if (!session) return
+            const model =
+              session.model ??
+              ModelV2.Ref.make({ providerID: ProviderV2.ID.make("controlled"), id: ModelV2.ID.make("smoke") })
+            const agent = session.agent ?? "build"
+            const assistantMessageID = SessionMessage.ID.create()
+            const textID = `text_${assistantMessageID}`
+            yield* events.publish(SessionEvent.Step.Started, {
+              timestamp: yield* DateTime.now,
+              sessionID: session.id,
+              assistantMessageID,
+              agent,
+              model,
+            })
+            yield* events.publish(SessionEvent.Text.Started, {
+              timestamp: yield* DateTime.now,
+              sessionID: session.id,
+              assistantMessageID,
+              textID,
+            })
+            yield* events.publish(SessionEvent.Text.Ended, {
+              timestamp: yield* DateTime.now,
+              sessionID: session.id,
+              assistantMessageID,
+              textID,
+              text: "Controlled OMO smoke completed.",
+            })
+            yield* events.publish(SessionEvent.Step.Ended, {
+              timestamp: yield* DateTime.now,
+              sessionID: session.id,
+              assistantMessageID,
+              finish: "stop",
+              cost: 0,
+              tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+            })
+          }),
+        })
+      }),
+    ),
+    deps: [EventV2.node, SessionStore.node],
+  })
+  const smokeLocationServices = LayerNode.group([Location.node, AgentV2.node, PermissionV2.node, controlledRunnerNode])
+  const smokeLocationMap = Layer.effect(
+    LocationServiceMap.Service,
+    LayerMap.make(
+      (ref: Location.Ref) => {
+        const location = LayerNode.hoist(smokeLocationServices, Node.tags.values.global, [
+          [Location.node, Location.boundNode(ref)],
+          [AgentV2.node, nativeSmokeAgentLayer],
+        ])
+        return LayerNode.compile(location.node).pipe(
+          Layer.provide(LayerNode.compile(location.hoisted)),
+        ) as unknown as Layer.Layer<LocationServices>
+      },
+      { idleTimeToLive: "1 minute" },
+    ),
+  )
+  const backgroundLayer = Layer.effect(
+    BackgroundJob.Service,
+    Effect.gen(function* () {
+      const service = yield* make
+      yield* Effect.addFinalizer(() => Ref.set(evidence.background, true))
+      return service
+    }),
+  )
+  const backgroundNode = LayerNode.make({ service: BackgroundJob.Service, layer: backgroundLayer, deps: [] })
+  const executionLayer = SessionExecutionLocal.layer.pipe(
+    Layer.tap(() => Effect.addFinalizer(() => Ref.set(evidence.execution, true))),
+  )
+  const executionNode = makeGlobalNode({
+    service: SessionExecution.Service,
+    layer: executionLayer,
+    deps: [SessionStore.node, LocationServiceMap.node],
+  })
+  const nativeDelegationNode = LayerNode.make({
+    service: DelegationService.Service,
+    layer: DelegationService.layerForTests.pipe(Layer.fresh, Layer.provide(backgroundLayer)),
+    deps: [Agent.node, Config.node, Database.node, RuntimeFlags.node, Session.node],
+  })
 
-    return SessionExecution.Service.of({
-      active: Effect.sync(() => new Set(active)),
-      resume: (sessionID) => run(sessionID),
-      wake: (sessionID) => run(sessionID),
-      interrupt: (sessionID) => Effect.sync(() => active.delete(sessionID)),
-    })
-  }),
-)
-const deterministicExecutionNode = makeGlobalNode({
-  service: SessionExecution.Service,
-  layer: deterministicExecution,
-  deps: [EventV2.node, SessionStore.node, LocationServiceMap.node],
-})
-
-const smokeLayer = AppNodeBuilder.build(
-  LayerNode.group([
-    Agent.node,
-    BackgroundJob.node,
-    Config.node,
-    Database.node,
-    DelegationService.node,
-    EventV2.node,
-    EventV2Bridge.node,
-    LocationServiceMap.node,
-    OmoObservability.node,
-    OmoRouter.node,
-    OmoStatus.node,
-    PermissionSaved.node,
-    ProjectV2.node,
-    RuntimeFlags.node,
-    Session.node,
-    SessionExecution.node,
-    SessionProjector.node,
-    SessionRunState.node,
-    SessionStatus.node,
-    SessionStore.node,
-    SessionV2.node,
-    SemifService.node,
-  ]),
-  [
-    [BackgroundJob.node, controlledBackground],
-    [Database.node, Database.layerFromPath(":memory:")],
-    [LocationServiceMap.node, smokeLocationMap],
-    [SessionExecution.node, deterministicExecutionNode],
-    [SemifService.node, controlledSemif],
-  ],
-)
+  return AppNodeBuilder.build(
+    LayerNode.group([
+      Agent.node,
+      BackgroundJob.node,
+      Config.node,
+      Database.node,
+      nativeDelegationNode,
+      EventV2.node,
+      EventV2Bridge.node,
+      LocationServiceMap.node,
+      OmoObservability.node,
+      OmoRouter.node,
+      OmoStatus.node,
+      PermissionSaved.node,
+      ProjectV2.node,
+      RuntimeFlags.node,
+      Session.node,
+      SessionExecution.node,
+      SessionProjector.node,
+      SessionRunState.node,
+      SessionStatus.node,
+      SessionStore.node,
+      SessionV2.node,
+      SemifService.node,
+    ]),
+    [
+      [BackgroundJob.node, backgroundNode],
+      [Database.node, Database.layerFromPath(":memory:")],
+      [DelegationService.node, nativeDelegationNode],
+      [LocationServiceMap.node, smokeLocationMap],
+      [SessionExecution.node, executionNode],
+      [SemifService.node, controlledSemif],
+    ],
+  )
+}

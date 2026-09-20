@@ -9,6 +9,11 @@ const RETRY_MS = 250
 const REQUEST_TIMEOUT_MS = 2_000
 
 const [binaryPath, logPath] = Bun.argv.slice(2)
+if (binaryPath === "--prepare-config") {
+  if (!logPath) throw new Error("usage: bun run smoke:omo -- --prepare-config <config-dir>")
+  await prepareSmokeConfig(logPath)
+  process.exit(0)
+}
 if (!binaryPath || !logPath) {
   throw new Error("usage: bun run smoke:omo -- <packaged-sidecar> <shell-log>")
 }
@@ -40,24 +45,9 @@ console.log(
 )
 
 async function runSidecar(path: string, deadline: number) {
-  const smokeDirectory = await mkdtemp(join(tmpdir(), "nextcode-omo-smoke-"))
-  const smokeConfig = JSON.stringify({
-    omo: {
-      enabled: true,
-      preset: "auto",
-      background: "allow",
-      routing: "deterministic",
-      verification: "tests",
-      disabled_agents: [],
-    },
-    semif: { mode: "off", download: "never" },
-  })
-  await Promise.all([
-    writeFile(join(smokeDirectory, "opencode.json"), smokeConfig),
-    mkdir(join(smokeDirectory, "opencode"), { recursive: true }).then(() =>
-      writeFile(join(smokeDirectory, "opencode", "opencode.json"), smokeConfig),
-    ),
-  ])
+  const smokeDirectory = process.env.NEXTCODE_SMOKE_CONFIG_DIR ?? (await mkdtemp(join(tmpdir(), "nextcode-omo-smoke-")))
+  const ownsSmokeDirectory = process.env.NEXTCODE_SMOKE_CONFIG_DIR === undefined
+  await prepareSmokeConfig(smokeDirectory)
   const env = {
     ...process.env,
     OPENCODE_DISABLE_MODELS_FETCH: "true",
@@ -118,8 +108,30 @@ async function runSidecar(path: string, deadline: number) {
       child_identities: [report.checks.foreground.child_id, report.checks.background.child_id],
     }
   } finally {
-    await rm(smokeDirectory, { recursive: true, force: true })
+    if (ownsSmokeDirectory) await rm(smokeDirectory, { recursive: true, force: true })
   }
+}
+
+async function prepareSmokeConfig(smokeDirectory: string) {
+  const smokeConfig = JSON.stringify({
+    omo: {
+      enabled: true,
+      preset: "auto",
+      background: "allow",
+      routing: "deterministic",
+      verification: "tests",
+      disabled_agents: [],
+    },
+    semif: { mode: "off", download: "never" },
+  })
+  await Promise.all([
+    mkdir(smokeDirectory, { recursive: true }),
+    mkdir(join(smokeDirectory, "opencode"), { recursive: true }),
+  ])
+  await Promise.all([
+    writeFile(join(smokeDirectory, "opencode.json"), smokeConfig),
+    writeFile(join(smokeDirectory, "opencode", "opencode.json"), smokeConfig),
+  ])
 }
 
 async function pollReadyEndpoint(logPath: string, deadline: number) {

@@ -81,6 +81,21 @@ jobs:
         working-directory: packages/desktop/src-tauri
         run: cargo build
 
+      - name: Prepare isolated OMO smoke config
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_dir="$RUNNER_TEMP/nextcode-omo-smoke-config"
+          (cd packages/desktop && bun run smoke:omo -- --prepare-config "$config_dir")
+          {
+            echo "NEXTCODE_SMOKE_CONFIG_DIR=$config_dir"
+            echo "OPENCODE_CONFIG_DIR=$config_dir"
+            echo "XDG_CONFIG_HOME=$config_dir"
+            echo "XDG_CACHE_HOME=$config_dir"
+            echo "XDG_DATA_HOME=$config_dir"
+            echo "XDG_STATE_HOME=$config_dir"
+          } >> "$GITHUB_ENV"
+
       - name: Run the shell and assert its behaviour
         working-directory: packages/desktop/src-tauri
         env:

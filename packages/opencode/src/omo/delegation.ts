@@ -112,7 +112,6 @@ const layer = Layer.effect(
     function v2(request: V2DelegateRequest) {
       return Effect.gen(function* () {
         if (request.abort.aborted) return yield* Effect.fail(new Error("Delegation cancelled"))
-
         const sessionsOption = yield* Effect.serviceOption(SessionV2.Service)
         const locationsOption = yield* Effect.serviceOption(LocationServiceMap.Service)
         if (Option.isNone(sessionsOption)) return yield* Effect.fail(new Error("V2 Session service is unavailable"))
@@ -608,6 +607,8 @@ export const node = LayerNode.make({
     Session.node,
   ],
 })
+
+export const layerForTests = layer
 
 function renderOutput(input: {
   sessionID: SessionID
