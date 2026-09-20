@@ -2,10 +2,15 @@ import { describe, expect } from "bun:test"
 import { Effect, Exit, Scope } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Location } from "@opencode-ai/core/location"
 import { AgentPlugin } from "@opencode-ai/core/plugin/agent"
 import { Config } from "@opencode-ai/core/config"
+import { ConfigAgent } from "@opencode-ai/core/config/agent"
+import { ConfigAgentPlugin } from "@opencode-ai/core/config/plugin/agent"
 import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Global } from "@opencode-ai/core/global"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "./fixture/location"
@@ -13,6 +18,7 @@ import { testEffect } from "./lib/effect"
 import { agentHost, host } from "./plugin/host"
 
 const it = testEffect(AppNodeBuilder.build(AgentV2.node))
+const itWithConfigAgent = testEffect(AppNodeBuilder.build(LayerNode.group([AgentV2.node, FSUtil.node, Global.node])))
 
 describe("AgentV2", () => {
   it.effect("starts without agents", () =>
@@ -207,6 +213,68 @@ describe("AgentV2", () => {
 
       expect(yield* agent.get(AgentV2.ID.make("orchestrator"))).toBeUndefined()
       expect(yield* agent.default()).toMatchObject({ id: AgentV2.ID.make("build") })
+    }),
+  )
+
+  it.effect("removes the pre-registered explore agent when OMO disables it", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({ disabled_agents: ["explore"] }),
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("explore"))).toBeUndefined()
+    }),
+  )
+
+  itWithConfigAgent.effect("applies a pending native variant after a later V2 model override", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({ agents: { designer: { variant: "medium" } } }),
+                agents: { designer: new ConfigAgent.Info({ model: "anthropic/claude-sonnet-4-6" }) },
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(Config.Service, config),
+        Effect.provideService(FSUtil.Service, yield* FSUtil.Service),
+        Effect.provideService(Global.Service, yield* Global.Service),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("designer"))).toMatchObject({
+        model: { providerID: "anthropic", id: "claude-sonnet-4-6", variant: "medium" },
+      })
     }),
   )
 })

@@ -175,11 +175,17 @@ export const Plugin = define({
       })
 
       if (resolvedOmo?.info.enabled && !legacyConflict) {
-        for (const definition of agentDefinitions(resolvedOmo.info)) {
+        const definitions = agentDefinitions(resolvedOmo.info)
+        if (!definitions.some((definition) => definition.id === "explore")) {
+          draft.remove(AgentV2.ID.make("explore"))
+        }
+        for (const definition of definitions) {
+          const variant = definition.variant === undefined ? undefined : ModelV2.VariantID.make(definition.variant)
           draft.update(AgentV2.ID.make(definition.id), (item) => {
             item.description = definition.description
             item.system = definition.prompt
             item.mode = definition.mode
+            AgentV2.setNativeVariant(item, variant)
             item.permissions.push(
               ...PermissionV2.merge(
                 defaults,
@@ -193,8 +199,10 @@ export const Plugin = define({
               item.model = {
                 id: model.modelID,
                 providerID: model.providerID,
-                ...(definition.variant === undefined ? {} : { variant: ModelV2.VariantID.make(definition.variant) }),
+                ...(variant === undefined ? {} : { variant }),
               }
+            } else if (variant !== undefined && item.model !== undefined) {
+              item.model.variant = variant
             }
           })
         }

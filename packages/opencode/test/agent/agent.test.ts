@@ -828,6 +828,20 @@ it.instance("legacy plugin conflict suppresses native OMO agents", () =>
   },
 )
 
+it.instance("OMO disabled_agents removes the pre-registered explore agent", () =>
+  Effect.gen(function* () {
+    const explore = yield* load((svc) => svc.get("explore"))
+    expect(explore).toBeUndefined()
+    const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+    expect(names).not.toContain("explore")
+  }),
+  {
+    config: {
+      omo: { disabled_agents: ["explore"] },
+    },
+  },
+)
+
 it.instance(
   "defaultAgent throws when all primary agents are disabled",
   () => expectDefaultAgentError("no primary visible agent found"),

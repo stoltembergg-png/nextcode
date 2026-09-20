@@ -269,7 +269,9 @@ const layer = Layer.effect(
         }
 
         if (omo.enabled && !legacyConflict) {
-          for (const definition of agentDefinitions(omo)) {
+          const definitions = agentDefinitions(omo)
+          if (!definitions.some((definition) => definition.id === "explore")) delete agents.explore
+          for (const definition of definitions) {
             const item = agents[definition.id]
             if (item) {
               item.description = definition.description
