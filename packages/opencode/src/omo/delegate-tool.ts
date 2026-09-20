@@ -8,6 +8,7 @@ import { Effect, Exit, Layer, Schema } from "effect"
 import { Config } from "@/config/config"
 import { DelegationService } from "./delegation"
 import { OmoRouter } from "./router"
+import { OmoRoutingActivity } from "./routing-activity"
 
 export const name = "omo_delegate"
 
@@ -66,6 +67,7 @@ type Runtime = {
   readonly config: Config.Interface
   readonly router: OmoRouter.Interface
   readonly delegation: DelegationService.Interface
+  readonly activity: OmoRoutingActivity.Interface
 }
 
 export const tool = (runtime: Runtime) =>
@@ -87,6 +89,7 @@ const layer = Layer.effectDiscard(
     const config = yield* Config.Service
     const router = yield* OmoRouter.Service
     const delegation = yield* DelegationService.Service
+    const activity = yield* OmoRoutingActivity.Service
     const global = yield* config.getGlobal()
 
     // The global configuration is the only context available while the shared
@@ -94,14 +97,14 @@ const layer = Layer.effectDiscard(
     // instance configuration so a project-local disable/conflict cannot run a
     // native delegation even when another instance enabled the carrier.
     if (nativeOmoAvailable(global))
-      yield* applications.register({ [name]: tool({ config, router, delegation }) }).pipe(Effect.orDie)
+      yield* applications.register({ [name]: tool({ config, router, delegation, activity }) }).pipe(Effect.orDie)
   }),
 )
 
 export const node = makeGlobalNode({
   name: "omo/delegate-tool",
   layer,
-  deps: [ApplicationTools.node, Config.node, OmoRouter.node, DelegationService.node],
+  deps: [ApplicationTools.node, Config.node, OmoRouter.node, DelegationService.node, OmoRoutingActivity.node],
 })
 
 export function nativeOmoAvailable(config: {
@@ -116,6 +119,11 @@ export function nativeOmoAvailable(config: {
 
 function execute(input: Input, context: Tool.Context, runtime: Runtime) {
   const abort = new AbortController()
+  const activity = runtime.activity.start({
+    sessionID: context.sessionID,
+    assistantMessageID: context.assistantMessageID,
+    toolCallID: context.toolCallID,
+  })
   return Effect.gen(function* () {
     const config = yield* runtime.config.get()
     if (!nativeOmoAvailable(config)) {
@@ -137,7 +145,9 @@ function execute(input: Input, context: Tool.Context, runtime: Runtime) {
       verification: input.verification,
       config: resolved,
       signal: abort.signal,
+      activity,
     })
+    yield* activity.selected(recommendation).pipe(Effect.catchCause(() => Effect.void))
 
     const agentConfig = resolved.agents[recommendation.agent]
     const parsedModel = agentConfig?.model ? ModelV2.parse(agentConfig.model) : undefined
@@ -152,6 +162,7 @@ function execute(input: Input, context: Tool.Context, runtime: Runtime) {
       recommendation.verification === "tests"
         ? `${input.prompt.slice(0, MAX_TEXT_LENGTH)}\n\n${TEST_VERIFICATION_INSTRUCTION}`
         : input.prompt
+    yield* activity.delegating(recommendation).pipe(Effect.catchCause(() => Effect.void))
     const delegated = yield* runtime.delegation.delegate({
       kind: "v2",
       description: input.description,
@@ -202,6 +213,7 @@ function execute(input: Input, context: Tool.Context, runtime: Runtime) {
           })
         : Effect.void,
     ),
+    Effect.ensuring(activity.clear().pipe(Effect.catchCause(() => Effect.void))),
     Effect.mapError(toToolFailure),
   )
 }

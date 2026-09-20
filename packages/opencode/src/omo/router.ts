@@ -14,6 +14,7 @@ import { SemifWarmup } from "@/semif/warmup"
 import { SemifService, type Status } from "@/semif/service"
 import type { SemifDecision, SemifDecisionRequest } from "@/semif/scoring"
 import { OmoObservability } from "./observability"
+import type { OmoRoutingActivity } from "./routing-activity"
 import { routeDeterministic, type DeterministicRoutingResult } from "./deterministic"
 import {
   generateStrategies,
@@ -54,6 +55,7 @@ export type OmoRoutingRequest = Readonly<{
   readonly config?: OmoRoutingConfig
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
+  readonly activity?: OmoRoutingActivity.Tracker
 }>
 
 export class OmoRoutingCancelled extends Error {
@@ -151,6 +153,7 @@ function routeInternal(
       return yield* fallback(`semif is ${status.status}`)
     }
 
+    if (request.activity) yield* request.activity.analyzing().pipe(Effect.catchCause(() => Effect.void))
     const decisionExit = yield* decideWithTimeout(
       runtime.semif,
       makeDecisionRequest(summary, evidence, strategies, request.signal),

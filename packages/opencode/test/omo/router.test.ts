@@ -5,6 +5,7 @@ import { Cause, Deferred, Effect, Exit, Fiber, Layer, Ref } from "effect"
 import { Config } from "../../src/config/config"
 import { OmoObservability } from "../../src/omo/observability"
 import { OmoRouter, OmoRoutingCancelled, type OmoRoutingRequest } from "../../src/omo/router"
+import { OmoRoutingActivity } from "../../src/omo/routing-activity"
 import { generateStrategies } from "../../src/omo/strategy"
 import { SemifService, SemifServiceError, type SemifStatus, type Status } from "../../src/semif/service"
 import type { SemifDecision, SemifDecisionRequest } from "../../src/semif/scoring"
@@ -184,9 +185,11 @@ describe("native OMO SemIf routing", () => {
   it.live("skips SemIf entirely for the deterministic policy", () =>
     Effect.gen(function* () {
       const counts = calls()
+      const phases: string[] = []
       const result = yield* route({
         ...baseRequest,
         config: { routing: "deterministic" },
+        activity: recordingActivity(phases),
       }).pipe(Effect.provide(routerLayer(fakeSemif(counts, ready))))
 
       expect(result.source).toBe("deterministic")
@@ -194,17 +197,20 @@ describe("native OMO SemIf routing", () => {
       expect(counts.start).toBe(0)
       expect(counts.acquire).toBe(0)
       expect(counts.decide).toBe(0)
+      expect(phases).toEqual([])
     }),
   )
 
   it.live("skips SemIf when only one strategy is eligible", () =>
     Effect.gen(function* () {
       const counts = calls()
+      const phases: string[] = []
       const result = yield* route({
         summary: "Run the focused check",
         eligibleAgents: ["fixer"],
         backgroundAvailable: false,
         availableVerification: ["none"],
+        activity: recordingActivity(phases),
       }).pipe(Effect.provide(routerLayer(fakeSemif(counts, ready))))
 
       expect(result.source).toBe("deterministic")
@@ -215,6 +221,7 @@ describe("native OMO SemIf routing", () => {
       expect(counts.start).toBe(0)
       expect(counts.acquire).toBe(0)
       expect(counts.decide).toBe(0)
+      expect(phases).toEqual([])
     }),
   )
 
@@ -345,6 +352,22 @@ describe("native OMO SemIf routing", () => {
     }),
   )
 
+  it.live("reports analyzing when SemIf resolves a partial explicit request", () =>
+    Effect.gen(function* () {
+      const counts = calls()
+      const phases: string[] = []
+      const result = yield* route({
+        summary: "Implement a parser fix",
+        explicit: { background: false },
+        activity: recordingActivity(phases),
+      }).pipe(Effect.provide(routerLayer(fakeSemif(counts, ready))))
+
+      expect(phases).toEqual(["analyzing"])
+      expect(result.source).toBe("explicit")
+      expect(counts.decide).toBe(1)
+    }),
+  )
+
   it.live("does not treat intentional deterministic routing as a SemIf failure", () =>
     Effect.gen(function* () {
       const counts = calls()
@@ -415,3 +438,12 @@ describe("native OMO SemIf routing", () => {
     }),
   )
 })
+
+function recordingActivity(phases: string[]): OmoRoutingActivity.Tracker {
+  return {
+    analyzing: () => Effect.sync(() => phases.push("analyzing")),
+    selected: () => Effect.void,
+    delegating: () => Effect.void,
+    clear: () => Effect.void,
+  }
+}

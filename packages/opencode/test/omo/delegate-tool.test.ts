@@ -12,6 +12,7 @@ import { Config } from "@/config/config"
 import { DelegationService } from "@/omo/delegation"
 import { OmoDelegateTool, nativeOmoAvailable, name, tool } from "@/omo/delegate-tool"
 import { OmoRouter } from "@/omo/router"
+import { OmoRoutingActivity } from "@/omo/routing-activity"
 import type { OmoRoutingRecommendation } from "@opencode-ai/core/omo"
 import { TestConfig } from "../fixture/config"
 import { testEffect } from "../lib/effect"
@@ -44,12 +45,30 @@ function runtime(options?: {
   readonly result?: Partial<DelegationService.DelegateResult>
   readonly config?: Config.Interface
   readonly delegate?: DelegationService.Interface["delegate"]
+  readonly activity?: OmoRoutingActivity.Interface
 }) {
   const calls: DelegationService.DelegateRequest[] = []
+  const phases: string[] = []
   const router: OmoRouter.Interface = {
-    route: () => Effect.succeed(options?.recommendation ?? recommendation),
-    recommend: () => Effect.succeed(options?.recommendation ?? recommendation),
+    route: (request) =>
+      (request.activity ? request.activity.analyzing().pipe(Effect.catchCause(() => Effect.void)) : Effect.void).pipe(
+        Effect.as(options?.recommendation ?? recommendation),
+      ),
+    recommend: (request) =>
+      (request.activity ? request.activity.analyzing().pipe(Effect.catchCause(() => Effect.void)) : Effect.void).pipe(
+        Effect.as(options?.recommendation ?? recommendation),
+      ),
   }
+  const activity =
+    options?.activity ??
+    OmoRoutingActivity.Service.of({
+      start: () => ({
+        analyzing: () => Effect.sync(() => phases.push("analyzing")),
+        selected: () => Effect.sync(() => phases.push("selected")),
+        delegating: () => Effect.sync(() => phases.push("delegating")),
+        clear: () => Effect.sync(() => phases.push("cleared")),
+      }),
+    })
   const delegation: DelegationService.Interface = {
     delegate:
       options?.delegate ??
@@ -64,7 +83,7 @@ function runtime(options?: {
         })
       }),
   }
-  return { tool: tool({ config: options?.config ?? config, router, delegation }), calls, router, delegation }
+  return { tool: tool({ config: options?.config ?? config, router, delegation, activity }), calls, phases, router, delegation, activity }
 }
 
 type ConfigInfo = ReturnType<Config.Interface["get"]> extends Effect.Effect<infer A, infer _E, infer _R> ? A : never
@@ -81,6 +100,7 @@ function registrationLayer(input: Pick<ConfigInfo, "omo" | "plugin">) {
     ],
     [OmoRouter.node, Layer.succeed(OmoRouter.Service, current.router)],
     [DelegationService.node, Layer.succeed(DelegationService.Service, current.delegation)],
+    [OmoRoutingActivity.node, Layer.succeed(OmoRoutingActivity.Service, current.activity)],
   ])
 }
 
@@ -151,6 +171,7 @@ describe("native omo_delegate tool", () => {
         agent: "fixer",
         prompt: expect.stringContaining("Verification requirement"),
       })
+      expect(current.phases).toEqual(["analyzing", "selected", "delegating", "cleared"])
     }),
   )
 
@@ -235,6 +256,48 @@ describe("native omo_delegate tool", () => {
 
       expect(signals).toHaveLength(1)
       expect(signals[0]?.aborted).toBe(true)
+      expect(current.phases).toEqual(["analyzing", "selected", "delegating", "cleared"])
+    }),
+  )
+
+  it.effect("clears routing activity once when delegation fails", () =>
+    Effect.gen(function* () {
+      const applications = yield* ApplicationTools.Service
+      const registry = yield* ToolRegistry.Service
+      const current = runtime({ delegate: () => Effect.fail(new Error("delegate failed")) })
+
+      yield* applications.register({ [name]: current.tool })
+      const result = yield* (yield* registry.materialize()).settle(
+        call({ description: "Fail work", prompt: "Fail the delegation." }),
+      )
+
+      expect(result.output?.structured).toBeUndefined()
+      expect(current.phases).toEqual(["analyzing", "selected", "delegating", "cleared"])
+    }),
+  )
+
+  it.effect("preserves delegation when routing activity publication fails", () =>
+    Effect.gen(function* () {
+      const applications = yield* ApplicationTools.Service
+      const registry = yield* ToolRegistry.Service
+      const current = runtime({
+        activity: OmoRoutingActivity.Service.of({
+          start: () => ({
+            analyzing: () => Effect.fail("activity failed"),
+            selected: () => Effect.fail("activity failed"),
+            delegating: () => Effect.fail("activity failed"),
+            clear: () => Effect.fail("activity failed"),
+          }),
+        }),
+      })
+
+      yield* applications.register({ [name]: current.tool })
+      const result = yield* (yield* registry.materialize()).settle(
+        call({ description: "Fix parser", prompt: "Implement the parser fix." }),
+      )
+
+      expect(result.result).toEqual({ type: "text", value: "validated child result" })
+      expect(current.calls).toHaveLength(1)
     }),
   )
 
