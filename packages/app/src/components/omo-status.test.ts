@@ -18,7 +18,7 @@ const semif = (status: OmoStatus["semif"]["status"]): OmoStatus["semif"] => ({
 
 const status = (overrides: Partial<OmoStatus> = {}): OmoStatus => ({
   enabled: true,
-  preset: "balanced",
+  preset: "opencode-go",
   agents: ["orchestrator", "fixer"],
   semif: semif("ready"),
   conflict: { active: false },
@@ -29,7 +29,7 @@ describe("omoStatusView", () => {
   test("shows the enabled preset, native agent count, and SemIf source", () => {
     expect(omoStatusView({ status: status() })).toEqual({
       state: "ready",
-      preset: "balanced",
+      preset: "opencode-go",
       agentCount: 2,
       source: "semif",
     })
