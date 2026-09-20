@@ -13,6 +13,8 @@ type ServiceState = {
   readonly handle?: object
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
+  readonly vulkanDownloadFailed?: boolean
+  readonly vulkanFetching?: boolean
 }
 
 // Mirrors the ready transition in `SemifService.acquireHandle`.
@@ -93,5 +95,85 @@ describe("semif service HIP fallback state", () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe("semif service Vulkan fallback state", () => {
+  test("ready transition preserves vulkan_download_failed for settled backend status", () => {
+    if (!hipPlatformSupported()) return
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const serverPath = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
+    const afterFailedFetch: ServiceState = {
+      status: "offline",
+      vulkanDownloadFailed: true,
+      vulkanFetching: false,
+    }
+
+    const settled = inspect({
+      requested: "auto",
+      serverPath,
+      env: { [SERVER_ENV]: serverPath },
+      inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+      vulkanDownloadFailed: markReady(afterFailedFetch, {}).vulkanDownloadFailed,
+      vulkanFetching: markReady(afterFailedFetch, {}).vulkanFetching,
+    })
+
+    expect(settled.fallbackReason).toBe("vulkan_download_failed")
+    expect(settled.fallbackReason).not.toBe("no_vendored_binary")
+    expect(settled.fallbackReason).not.toBe("hip_download_failed")
+  })
+
+  test("mid-fetch status does not report no_vendored_binary while Vulkan fetch is in flight", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-service-vulkan-state-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const serverPath = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(serverPath, "cpu")
+    try {
+      const fetching = resolveBackend({
+        requested: "auto",
+        serverPath,
+        env: { [SERVER_ENV]: serverPath },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        vulkanFetching: true,
+      })
+      expect(fetching.fallbackReason).toBeUndefined()
+      expect(fetching.fallback).toBe(false)
+      expect(fetching.message).toContain("fetching Vulkan runtime")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("service.ts fetches Vulkan before HIP and records vulkanDownloadFailed on auto failure", async () => {
+    const source = await Bun.file(path.join(import.meta.dir, "../../src/semif/service.ts")).text()
+    const body = (name: string) => {
+      const start = source.indexOf(`const ${name}`)
+      expect(start).toBeGreaterThan(-1)
+      const from = start + 1
+      const next = source.slice(from).search(/\n    const ensure/)
+      return source.slice(start, next === -1 ? undefined : from + next)
+    }
+
+    const vulkanBody = body("ensureVulkanRuntime")
+    expect(vulkanBody).toContain("vulkanFetching: true")
+    expect(vulkanBody).toContain("vulkanDownloadFailed: true")
+    expect(vulkanBody).not.toContain("hipDownloadFailed: true")
+    expect(vulkanBody).toContain("SemifVulkanRuntime.ensure")
+    expect(vulkanBody).toContain("SemifVulkanRuntime.shouldFetch")
+
+    const acquireStart = source.indexOf("const acquireHandle")
+    const acquireSlice = source.slice(acquireStart, source.indexOf("const ensureHandle", acquireStart))
+    expect(acquireSlice.indexOf("yield* ensureVulkanRuntime")).toBeGreaterThan(-1)
+    expect(acquireSlice.indexOf("yield* ensureVulkanRuntime")).toBeLessThan(acquireSlice.indexOf("yield* ensureHipRuntime"))
+
+    expect(source).toContain("vulkanFetching: current.vulkanFetching")
+    expect(source).toContain("vulkanDownloadFailed: current.vulkanDownloadFailed")
+    expect(source).toContain("variant: activeVariant")
+
+    expect(body("ensureHipRuntime")).toContain("amdHipUnsupported(inventory)")
+    expect(body("ensureRocmRuntime")).toContain("amdHipUnsupported(inventory)")
   })
 })

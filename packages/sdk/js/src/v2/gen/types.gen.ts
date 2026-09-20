@@ -2085,6 +2085,7 @@ export type SemifStatus = {
     | "missing_rocm_runtime"
     | "no_vendored_binary"
     | "hip_download_failed"
+    | "vulkan_download_failed"
     | "unsupported_variant"
   backendMessage?: string
   systemRuntimeMissing: boolean

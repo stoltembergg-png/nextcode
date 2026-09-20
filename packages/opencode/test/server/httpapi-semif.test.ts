@@ -1,5 +1,5 @@
 import { NodeHttpServer } from "@effect/platform-node"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Context, Effect, Layer, Option } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -19,6 +19,7 @@ import { semifHandlers } from "../../src/server/routes/instance/httpapi/handlers
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
+import path from "node:path"
 
 // The SemIf service owns one model per machine, so these routes are mounted on
 // the server-level root API. No instance or workspace context is involved.
@@ -155,4 +156,9 @@ describe("semif HttpApi", () => {
       expect(yield* response.json).toMatchObject({ status: "not_downloaded" })
     }),
   )
+})
+
+test("generated SDK SemifStatus includes vulkan_download_failed", async () => {
+  const types = await Bun.file(path.join(import.meta.dir, "../../../sdk/js/src/v2/gen/types.gen.ts")).text()
+  expect(types).toContain('"vulkan_download_failed"')
 })
