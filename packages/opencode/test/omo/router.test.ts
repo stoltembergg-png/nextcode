@@ -196,6 +196,27 @@ describe("native OMO SemIf routing", () => {
     }),
   )
 
+  it.live("skips SemIf when only one strategy is eligible", () =>
+    Effect.gen(function* () {
+      const counts = calls()
+      const result = yield* route({
+        summary: "Run the focused check",
+        eligibleAgents: ["fixer"],
+        backgroundAvailable: false,
+        availableVerification: ["none"],
+      }).pipe(Effect.provide(routerLayer(fakeSemif(counts, ready))))
+
+      expect(result.source).toBe("deterministic")
+      expect(result.agent).toBe("fixer")
+      expect(result.background).toBe(false)
+      expect(result.verification).toBe("none")
+      expect(counts.status).toBe(0)
+      expect(counts.start).toBe(0)
+      expect(counts.acquire).toBe(0)
+      expect(counts.decide).toBe(0)
+    }),
+  )
+
   it.live("reads omo routing policy from the legacy Config service", () =>
     Effect.gen(function* () {
       const counts = calls()
@@ -218,6 +239,24 @@ describe("native OMO SemIf routing", () => {
 
       expect(result.verification).toBe("tests")
       expect(counts.requests[0]?.options.every((option) => option.id.endsWith(":tests"))).toBe(true)
+    }),
+  )
+
+  it.live("propagates timeout cancellation to the SemIf decision signal", () =>
+    Effect.gen(function* () {
+      const counts = calls()
+      const interrupted = yield* Deferred.make<void>()
+      let decisionSignal: AbortSignal | undefined
+      const semif = fakeSemif(counts, ready, (request) => {
+        decisionSignal = request.signal
+        return Effect.never.pipe(Effect.ensuring(Deferred.succeed(interrupted, undefined)))
+      })
+      const result = yield* route({ ...baseRequest, timeoutMs: 5 }).pipe(Effect.provide(routerLayer(semif)))
+
+      yield* Deferred.await(interrupted)
+      expect(result.source).toBe("deterministic")
+      expect(decisionSignal?.aborted).toBe(true)
+      expect(counts.decide).toBe(1)
     }),
   )
 
@@ -258,6 +297,36 @@ describe("native OMO SemIf routing", () => {
     }),
   )
 
+  it.live("rejects malformed missing_slots and incomplete decision records", () =>
+    Effect.gen(function* () {
+      const missingSlotsShape = calls()
+      const malformedSlots = yield* route({ ...baseRequest }).pipe(
+        Effect.provide(
+          routerLayer(
+            fakeSemif(missingSlotsShape, ready, (request) =>
+              Effect.succeed({ ...decision(request), missing_slots: "B" } as unknown as SemifDecision),
+            ),
+          ),
+        ),
+      )
+      expect(malformedSlots.source).toBe("deterministic")
+
+      const incomplete = calls()
+      const missingModel = yield* route({ ...baseRequest }).pipe(
+        Effect.provide(
+          routerLayer(
+            fakeSemif(incomplete, ready, (request) => {
+              const value = decision(request) as unknown as Record<string, unknown>
+              delete value.model
+              return Effect.succeed(value as unknown as SemifDecision)
+            }),
+          ),
+        ),
+      )
+      expect(missingModel.source).toBe("deterministic")
+    }),
+  )
+
   it.live("applies explicit fields while retaining SemIf fields not overridden", () =>
     Effect.gen(function* () {
       const counts = calls()
@@ -272,6 +341,28 @@ describe("native OMO SemIf routing", () => {
 
       expect(result).toMatchObject({ agent: "fixer", background: true, verification: "tests", source: "explicit" })
       expect(counts.requests[0]?.options.every((option) => option.id.startsWith("fixer:"))).toBe(true)
+    }),
+  )
+
+  it.live("does not treat intentional deterministic routing as a SemIf failure", () =>
+    Effect.gen(function* () {
+      const counts = calls()
+      const result = yield* Effect.gen(function* () {
+        const router = yield* OmoRouter.Service
+        const recommendation = yield* router.route({ ...baseRequest, config: { routing: "deterministic" } })
+        const observability = yield* OmoObservability.Service
+        return {
+          recommendation,
+          latest: yield* observability.last(),
+          failure: yield* observability.lastFailure(),
+        }
+      }).pipe(Effect.provide(routerLayer(fakeSemif(counts, ready))))
+
+      expect(result.recommendation.source).toBe("deterministic")
+      expect(result.latest?.source).toBe("deterministic")
+      expect(result.failure).toBeUndefined()
+      expect(counts.status).toBe(0)
+      expect(counts.decide).toBe(0)
     }),
   )
 
@@ -294,6 +385,7 @@ describe("native OMO SemIf routing", () => {
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(OmoRoutingCancelled)
       expect(counts.decide).toBe(1)
+      expect(counts.requests[0]?.signal?.aborted).toBe(true)
     }),
   )
 

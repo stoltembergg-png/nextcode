@@ -20,6 +20,7 @@ export type OmoRoutingObservation = Readonly<{
   readonly overrides: OmoRoutingOverrides
   readonly alternatives: readonly OmoRoutingAlternative[]
   readonly fallbackReason?: string
+  readonly failure?: boolean
   readonly durationMs: number
 }>
 
@@ -47,7 +48,8 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const normalized = normalizeObservation(observation)
         yield* Ref.set(latest, normalized)
-        if (normalized.fallbackReason) {
+        const failed = normalized.failure ?? Boolean(normalized.fallbackReason)
+        if (failed && normalized.fallbackReason) {
           yield* Ref.set(failure, {
             reason: normalized.fallbackReason,
             durationMs: normalized.durationMs,
@@ -95,6 +97,7 @@ function normalizeObservation(observation: OmoRoutingObservation): OmoRoutingObs
     overrides,
     alternatives: Object.freeze(alternatives),
     ...(observation.fallbackReason ? { fallbackReason: sanitizeReason(observation.fallbackReason) } : {}),
+    ...(observation.failure === undefined ? {} : { failure: observation.failure }),
     durationMs,
   })
 }
@@ -108,6 +111,7 @@ function routingLogFields(observation: OmoRoutingObservation) {
     overrides: observation.overrides,
     alternatives: observation.alternatives,
     ...(observation.fallbackReason ? { fallbackReason: observation.fallbackReason } : {}),
+    ...(observation.failure === undefined ? {} : { failure: observation.failure }),
     durationMs: observation.durationMs,
   }
 }

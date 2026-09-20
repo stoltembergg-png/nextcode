@@ -125,7 +125,7 @@ function routeInternal(
     const summary = boundSummary(request.summary)
     const evidence = boundEvidence(request.evidence)
     const route = resolved.routing ?? "auto"
-    const fallback = (reason: string) =>
+    const fallback = (reason: string, failure = true) =>
       fallbackRecommendation({
         summary,
         evidence,
@@ -134,9 +134,11 @@ function routeInternal(
         reason,
         started,
         observability: runtime.observability,
+        failure,
       })
 
-    if (route === "deterministic") return yield* fallback("deterministic routing policy")
+    if (strategies.length < 2) return yield* fallback("single eligible strategy", false)
+    if (route === "deterministic") return yield* fallback("deterministic routing policy", false)
 
     const statusExit = yield* runtime.semif.status().pipe(Effect.exit)
     if (Exit.isFailure(statusExit)) {
@@ -151,7 +153,7 @@ function routeInternal(
 
     const decisionExit = yield* decideWithTimeout(
       runtime.semif,
-      makeDecisionRequest(summary, evidence, strategies),
+      makeDecisionRequest(summary, evidence, strategies, request.signal),
       request.timeoutMs,
     ).pipe(Effect.exit)
     if (Exit.isFailure(decisionExit)) {
@@ -226,6 +228,7 @@ function makeDecisionRequest(
   summary: string,
   evidence: readonly string[],
   strategies: readonly OmoStrategy[],
+  signal?: AbortSignal,
 ): SemifDecisionRequest {
   return {
     state: { summary, evidence },
@@ -234,6 +237,7 @@ function makeDecisionRequest(
       id: strategy.id,
       description: optionDescription(strategy),
     })),
+    ...(signal ? { signal } : {}),
   }
 }
 
@@ -250,12 +254,34 @@ function decideWithTimeout(
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ) {
   const duration = Number.isFinite(timeoutMs) ? Math.max(1, Math.trunc(timeoutMs)) : DEFAULT_TIMEOUT_MS
-  return service.decide(request).pipe(
-    Effect.timeoutOrElse({
-      duration,
-      orElse: () => Effect.fail(new Error(`semif decision timed out after ${duration}ms`)),
-    }),
-  )
+  const controller = new AbortController()
+  const unlink = linkAbortSignal(request.signal, controller)
+  const timeoutMessage = `semif decision timed out after ${duration}ms`
+  return service
+    .decide({ ...request, signal: controller.signal })
+    .pipe(
+      Effect.timeoutOrElse({
+        duration,
+        orElse: () => Effect.sync(() => controller.abort(new Error(timeoutMessage))).pipe(Effect.andThen(Effect.fail(new Error(timeoutMessage)))),
+      }),
+      Effect.ensuring(
+        Effect.sync(() => {
+          unlink()
+          if (!controller.signal.aborted) controller.abort(new Error("semif decision interrupted"))
+        }),
+      ),
+    )
+}
+
+function linkAbortSignal(source: AbortSignal | undefined, target: AbortController) {
+  if (!source) return () => undefined
+  const abort = () => target.abort(source.reason)
+  if (source.aborted) {
+    abort()
+    return () => undefined
+  }
+  source.addEventListener("abort", abort, { once: true })
+  return () => source.removeEventListener("abort", abort)
 }
 
 function normalizeDecision(
@@ -264,10 +290,7 @@ function normalizeDecision(
 ):
   | { readonly _tag: "Success"; readonly strategy: OmoStrategy; readonly alternatives: readonly OmoRoutingAlternative[] }
   | { readonly _tag: "Failure"; readonly reason: string } {
-  if (!isRecord(decision)) return { _tag: "Failure", reason: "semif returned malformed output" }
-  if (!Array.isArray(decision.option_ids) || !Array.isArray(decision.probabilities)) {
-    return { _tag: "Failure", reason: "semif returned malformed option scores" }
-  }
+  if (!isCompleteDecision(decision)) return { _tag: "Failure", reason: "semif returned malformed output" }
   if (decision.option_ids.length !== strategies.length || decision.probabilities.length !== strategies.length) {
     return { _tag: "Failure", reason: "semif returned an incomplete option score list" }
   }
@@ -321,6 +344,7 @@ function fallbackRecommendation(input: {
   readonly reason: string
   readonly started: number
   readonly observability: OmoObservability.Interface
+  readonly failure?: boolean
 }) {
   const deterministic = routeDeterministic({
     summary: input.summary,
@@ -339,6 +363,7 @@ function fallbackRecommendation(input: {
       overrides: input.explicit,
       alternatives: recommendation.alternatives,
       fallbackReason: recommendation.fallbackReason,
+      ...(input.failure === undefined ? {} : { failure: input.failure }),
       durationMs: elapsed(input.started),
     })
     .pipe(Effect.ignore, Effect.as(recommendation))
@@ -420,6 +445,42 @@ function causeMessage(cause: Cause.Cause<unknown>) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function isCompleteDecision(value: unknown): value is SemifDecision {
+  if (!isRecord(value)) return false
+  if (
+    typeof value.id !== "string" ||
+    !isStringArray(value.option_ids) ||
+    !isNumberArray(value.probabilities) ||
+    !isNumberArray(value.option_logits) ||
+    !isNumberArray(value.answer_token_ids) ||
+    typeof value.chosen !== "string" ||
+    !Number.isFinite(value.input_tokens) ||
+    typeof value.prompt_sha256 !== "string" ||
+    typeof value.prompt_version !== "string" ||
+    !isRecord(value.model) ||
+    typeof value.model.source !== "string" ||
+    typeof value.model.revision !== "string" ||
+    typeof value.model.server !== "string" ||
+    typeof value.probability_status !== "string" ||
+    typeof value.readout !== "string" ||
+    !Number.isFinite(value.forward_seconds) ||
+    !Number.isFinite(value.total_seconds) ||
+    !isStringArray(value.missing_slots) ||
+    (value.cached !== undefined && typeof value.cached !== "boolean")
+  ) {
+    return false
+  }
+  return value.option_logits.length === value.option_ids.length && value.answer_token_ids.length === value.option_ids.length
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
+function isNumberArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "number")
 }
 
 export * as OmoRouter from "./router"

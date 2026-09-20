@@ -500,7 +500,12 @@ const layer = Layer.effect(
           }
           return yield* Effect.tryPromise({
             try: () =>
-              SemifScoring.decide({ url: handle.url }, loaded.resolved, request, SemifManifest.profile(entry)),
+              SemifScoring.decide(
+                { url: handle.url, signal: request.signal },
+                loaded.resolved,
+                request,
+                SemifManifest.profile(entry),
+              ),
             catch: (cause) => new SemifServiceError({ reason: errorMessage(cause) }),
           })
         }).pipe(
