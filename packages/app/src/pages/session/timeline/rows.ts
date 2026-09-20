@@ -270,14 +270,17 @@ export namespace Timeline {
   ) {
     const assistantMessageIDs = new Set(assistantMessages.map((message) => message.id))
     const userMessageCreatedAt = userMessage.time.created
-    return routingActivities.reduce<OmoRoutingEvent.OmoRoutingActivity | undefined>((latest, activity) => {
-      if (activity.sessionID !== userMessage.sessionID || activity.state.phase === "cleared") return latest
-      const exact = assistantMessageIDs.has(activity.assistantMessageID)
-      if (!exact && (typeof userMessageCreatedAt !== "number" || activity.startedAt < userMessageCreatedAt)) return latest
-      if (!latest || activity.updatedAt > latest.updatedAt) return activity
-      if (activity.updatedAt < latest.updatedAt) return latest
-      return exact ? activity : latest
-    }, undefined)
+    const latest = (matches: (activity: OmoRoutingEvent.OmoRoutingActivity) => boolean) =>
+      routingActivities.reduce<OmoRoutingEvent.OmoRoutingActivity | undefined>((result, activity) => {
+        if (activity.sessionID !== userMessage.sessionID || activity.state.phase === "cleared" || !matches(activity))
+          return result
+        if (!result || activity.updatedAt > result.updatedAt) return activity
+        return result
+      }, undefined)
+    const exact = latest((activity) => assistantMessageIDs.has(activity.assistantMessageID))
+    if (exact) return exact
+    if (typeof userMessageCreatedAt !== "number") return
+    return latest((activity) => activity.startedAt >= userMessageCreatedAt)
   }
 
   function cleanHeading(value: string) {

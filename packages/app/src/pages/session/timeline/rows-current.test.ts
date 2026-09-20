@@ -57,14 +57,49 @@ describe("current session timeline rows", () => {
 
   test("falls back to a newer unprojected assistant activity on the active final turn", () => {
     const source = [
-      { id: "msg_user", type: "user", text: "route", time: { created: 1 } },
+      { id: "msg_user", type: "user", text: "route", time: { created: 1_000 } },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const activity = (startedAt: number, updatedAt: number, assistantMessageID: string, toolCallID: string) =>
+      ({
+        sessionID: "ses_1",
+        assistantMessageID,
+        toolCallID,
+        sequence: 0,
+        startedAt,
+        updatedAt,
+        state: { phase: "analyzing" },
+      }) as OmoRoutingEvent.OmoRoutingActivity
+
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        activity(900, 950, "msg_unrelated", "call_unrelated"),
+        activity(1_100, 1_200, "msg_assistant_new", "call_new"),
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_new")
+  })
+
+  test("prefers an exact current assistant activity over a newer fallback candidate", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "route", time: { created: 1_000 } },
       {
-        id: "msg_assistant_old",
+        id: "msg_assistant_current",
         type: "assistant",
         agent: "build",
         model: { id: "model", providerID: "provider" },
         content: [],
-        time: { created: 2 },
+        time: { created: 1_100 },
       },
     ] satisfies SessionMessageInfo[]
     const normalized = normalizeSessionMessages("ses_1", source)
@@ -89,14 +124,13 @@ describe("current session timeline rows", () => {
       true,
       normalized.messages.filter((message) => message.role === "user"),
       [
-        activity(2, 1, "msg_assistant_old", "call_old"),
-        activity(0, 3, "msg_unrelated", "call_unrelated"),
-        activity(3, 2, "msg_assistant_new", "call_new"),
+        activity(1_100, 1_200, "msg_assistant_current", "call_current"),
+        activity(1_300, 1_400, "msg_assistant_unrelated", "call_unrelated"),
       ],
     )
 
     const thinking = result.rows.find((row) => row._tag === "Thinking")
-    expect(thinking?.routingActivity?.toolCallID).toBe("call_new")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_current")
   })
 
   test("derives turns and tagged rows from chronological current messages", () => {
