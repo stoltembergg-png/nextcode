@@ -4,7 +4,6 @@
 // NEXTCODE_SEMIF_GFX. Production detection maps common RX product names to
 // TheRock gfx targets from the pinned lock matrix.
 
-import { execSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 import { deviceWheel, embeddedRocmLock, supportedGfx } from "../../script/fetch-rocm-runtime"
@@ -111,18 +110,23 @@ function readLinuxGfx(): string | undefined {
 }
 
 function readWindowsGfx(): string | undefined {
-  try {
-    const output = execSync(
-      "powershell -NoProfile -Command \"Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -match 'VEN_1002' } | ForEach-Object { $_.PNPDeviceID + '|' + $_.Name }\"",
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    )
-    for (const line of output.split(/\r?\n/)) {
-      const [pnp = "", name = ""] = line.split("|")
-      const mapped = mapPciToGfx(pnp) ?? mapNameToGfx(name)
-      if (mapped) return mapped
-    }
-  } catch {
-    return undefined
+  const result = Bun.spawnSync({
+    cmd: [
+      "powershell",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -match 'VEN_1002' } | ForEach-Object { $_.PNPDeviceID + '|' + $_.Name }",
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 3000,
+  })
+  if (!result.success) return undefined
+  for (const line of result.stdout.toString("utf8").split(/\r?\n/)) {
+    const [pnp = "", name = ""] = line.split("|")
+    const mapped = mapPciToGfx(pnp) ?? mapNameToGfx(name)
+    if (mapped) return mapped
   }
   return undefined
 }
