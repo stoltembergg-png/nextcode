@@ -11,6 +11,7 @@ import { ConfigFormatterV1 } from "./formatter"
 import { ConfigLayoutV1 } from "./layout"
 import { ConfigLSPV1 } from "./lsp"
 import { ConfigMCPV1 } from "./mcp"
+import { ConfigOmo } from "../../config/omo"
 import { ConfigPermissionV1 } from "./permission"
 import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
@@ -41,6 +42,9 @@ export const Info = Schema.Struct({
   }),
   semif: Schema.optional(ConfigSemifV1.Info).annotate({
     description: "Local semantic decision (SemIf) model configuration",
+  }),
+  omo: Schema.optional(ConfigOmo.Info).annotate({
+    description: "Native OMO orchestration, routing, and verification configuration",
   }),
   command: Schema.optional(Schema.Record(Schema.String, ConfigCommandV1.Info)).annotate({
     description: "Command configuration, see https://opencode.ai/docs/commands",
