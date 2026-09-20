@@ -1843,6 +1843,72 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   )
 }
 
+function SemifOutput(props: { output?: string }) {
+  const [state, setState] = createStore({ text: "" })
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const clear = () => {
+    if (timer === undefined) return
+    clearTimeout(timer)
+    timer = undefined
+  }
+
+  createEffect(() => {
+    clear()
+    const text = props.output ?? ""
+    setState("text", "")
+    if (!text) return
+    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setState("text", text)
+      return
+    }
+
+    const chunks = text.match(/\S{1,24}|\s+/g) ?? []
+    let index = 0
+    let shown = ""
+    const run = () => {
+      const chunk = chunks[index]
+      if (chunk === undefined) return
+      index += 1
+      shown += chunk
+      setState("text", shown)
+      if (index < chunks.length) timer = setTimeout(run, SEMIF_OUTPUT_PACE_MS)
+    }
+    run()
+    onCleanup(clear)
+  })
+
+  onCleanup(clear)
+
+  return (
+    <pre data-component="semif-output">
+      <code>{state.text}</code>
+    </pre>
+  )
+}
+
+ToolRegistry.register({
+  name: "semif_decide",
+  render(props) {
+    const i18n = useI18n()
+    return (
+      <BasicTool
+        {...props}
+        icon="mcp"
+        trigger={{ title: i18n.t("ui.basicTool.called", { tool: props.tool }) }}
+      >
+        <Show when={props.output}>
+          {(output) => (
+            <div data-component="tool-output" data-scrollable>
+              <SemifOutput output={output()} />
+            </div>
+          )}
+        </Show>
+      </BasicTool>
+    )
+  },
+})
+
 ToolRegistry.register({
   name: "read",
   render(props) {
