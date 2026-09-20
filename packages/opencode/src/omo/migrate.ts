@@ -5,6 +5,7 @@ import path from "node:path"
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser"
 
 import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { Global } from "@opencode-ai/core/global"
 
 const LEGACY_FILE_NAMES = ["oh-my-opencode-slim.json", "oh-my-opencode-slim.jsonc"] as const
@@ -45,6 +46,13 @@ export type MigrationSource = {
   hash: string
 }
 
+export type MigrationSourceError = {
+  path: string
+  scope: "global" | "project"
+  code: "legacy_unreadable" | "invalid_legacy"
+  message: string
+}
+
 export type PluginRemoval = {
   path: string
   index: number
@@ -52,7 +60,7 @@ export type PluginRemoval = {
 }
 
 export type MigrationRefusal = {
-  code: "native_omo_exists" | "invalid_target"
+  code: "native_omo_exists" | "invalid_target" | "invalid_legacy" | "legacy_unreadable" | "target_unreadable"
   message: string
 }
 
@@ -66,6 +74,7 @@ export type MigrationPreview = {
     removePlugins: readonly string[]
   }
   sourceFiles: readonly MigrationSource[]
+  sourceErrors: readonly MigrationSourceError[]
   native: ConfigOmo.Info
   normalized: ConfigOmo.Info
   imported: readonly string[]
@@ -84,31 +93,44 @@ export type MigrationPreview = {
 export type MigrationResult = Omit<MigrationPreview, "canApply"> & {
   status: "preview" | "applied" | "refused" | "failed"
   canApply: boolean
-  reason?: "stale_preview" | "native_omo_exists" | "invalid_target" | "write_failed" | "replace_requires_apply"
+  reason?:
+    | "stale_preview"
+    | "native_omo_exists"
+    | "invalid_target"
+    | "invalid_legacy"
+    | "legacy_unreadable"
+    | "target_unreadable"
+    | "write_failed"
+    | "replace_requires_apply"
   error?: string
 }
 
 export async function discoverLegacyFiles(input: MigrationInput = {}) {
-  const globalConfigDir = path.resolve(input.globalConfigDir ?? Global.Path.config)
-  const projectRoot = path.resolve(input.projectDir ?? input.cwd ?? process.cwd())
-  const global = await existingLegacyFiles(globalConfigDir)
-  const project = await findProjectLegacyFiles(projectRoot)
-  return [
-    ...global.map((file) => ({ path: file, scope: "global" as const })),
-    ...project.map((file) => ({ path: file, scope: "project" as const })),
-  ]
+  const result = await discoverLegacyFilesWithFs(input, migrationFs(input.fs))
+  return result.files
 }
 
 export async function planMigration(input: MigrationInput = {}): Promise<MigrationPreview> {
   const fs = migrationFs(input.fs)
-  const discovered = await discoverLegacyFiles(input)
+  const discovered = await discoverLegacyFilesWithFs(input, fs)
   const sourceFiles: MigrationSource[] = []
   const legacy: Record<string, unknown>[] = []
   const unsupported: UnsupportedField[] = []
+  const sourceErrors = [...discovered.errors]
 
-  for (const source of discovered) {
-    const sourceText = await fs.readFile(source.path).catch(() => undefined)
-    if (sourceText === undefined) continue
+  for (const source of discovered.files) {
+    const read = await readOptional(fs, source.path)
+    if (read.status === "missing") continue
+    if (read.status === "error") {
+      sourceErrors.push({
+        path: source.path,
+        scope: source.scope,
+        code: "legacy_unreadable",
+        message: errorMessage(read.error),
+      })
+      continue
+    }
+    const sourceText = read.text
     const parsed = parseLegacy(sourceText)
     sourceFiles.push({
       path: source.path,
@@ -117,6 +139,12 @@ export async function planMigration(input: MigrationInput = {}): Promise<Migrati
       hash: hash(sourceText),
     })
     if (parsed.errors.length > 0 || !isRecord(parsed.value)) {
+      sourceErrors.push({
+        path: source.path,
+        scope: source.scope,
+        code: "invalid_legacy",
+        message: parsed.errors.length > 0 ? "invalid JSON/JSONC" : "top-level value must be an object",
+      })
       unsupported.push({
         path: source.path,
         message: parsed.errors.length > 0 ? "invalid JSON/JSONC" : "top-level value must be an object",
@@ -130,11 +158,24 @@ export async function planMigration(input: MigrationInput = {}): Promise<Migrati
   const projection = projectLegacy(merged)
   unsupported.push(...projection.unsupported)
 
-  const targetFile = path.resolve(input.targetFile ?? (await defaultTargetFile(input.globalConfigDir ?? Global.Path.config, fs)))
-  const targetText = await fs.readFile(targetFile).catch(() => undefined)
-  const targetParsed = targetText === undefined ? { value: {}, errors: [] as ParseError[] } : parseLegacy(targetText)
+  const globalConfigDir = path.resolve(input.globalConfigDir ?? Flag.OPENCODE_CONFIG_DIR ?? Global.Path.config)
+  const targetSelection = input.targetFile
+    ? { path: path.resolve(input.targetFile) }
+    : await defaultTargetFile(globalConfigDir, fs)
+  const targetFile = targetSelection.path
+  const targetRead = targetSelection.error ? { status: "error" as const, error: targetSelection.error } : await readOptional(fs, targetFile)
+  const targetText = targetRead.status === "ok" ? targetRead.text : undefined
+  const targetParsed = targetRead.status === "ok" ? parseLegacy(targetRead.text) : { value: {}, errors: [] as ParseError[] }
   const targetData = isRecord(targetParsed.value) ? targetParsed.value : undefined
-  const refusal = targetParsed.errors.length
+  const sourceRefusal = sourceErrors[0]
+    ? ({
+        code: sourceErrors[0].code,
+        message: `${sourceErrors[0].path}: ${sourceErrors[0].message}`,
+      } as const)
+    : undefined
+  const targetRefusal = targetRead.status === "error"
+    ? ({ code: "target_unreadable", message: `${targetFile}: ${errorMessage(targetRead.error)}` } as const)
+    : targetParsed.errors.length
     ? ({ code: "invalid_target", message: `${targetFile} contains invalid JSON/JSONC` } as const)
     : targetText !== undefined && targetData === undefined
       ? ({ code: "invalid_target", message: `${targetFile} must contain a top-level object` } as const)
@@ -145,22 +186,27 @@ export async function planMigration(input: MigrationInput = {}): Promise<Migrati
   const plugin = targetData ? readPluginEntries(targetData) : undefined
   const backupPath = targetText === undefined ? undefined : await availableBackupPath(targetFile, input.now, fs)
   const dedupedUnsupported = dedupeUnsupported(unsupported)
+  const refusal = sourceRefusal ?? targetRefusal
   const preview: MigrationPreview = {
     version: 1,
     targetFile,
-    targetExists: targetText !== undefined,
+    targetExists: targetRead.status !== "missing",
     ...(targetText === undefined ? {} : { targetHash: hash(targetText) }),
     targetDiff: {
       set: ["omo"],
       removePlugins: plugin?.removals.map((item) => item.path) ?? [],
     },
     sourceFiles,
+    sourceErrors,
     native: projection.native,
     normalized: projection.native,
     imported: projection.imported,
     unsupported: dedupedUnsupported,
     unsupportedPaths: dedupedUnsupported.map((item) => item.path),
-    warnings: dedupedUnsupported.map((item) => `${item.path}: ${item.message}`),
+    warnings: [
+      ...sourceErrors.map((item) => `${item.path}: ${item.message}`),
+      ...dedupedUnsupported.map((item) => `${item.path}: ${item.message}`),
+    ],
     ...(plugin?.key ? { pluginKey: plugin.key } : {}),
     pluginRemovals: plugin?.removals ?? [],
     pluginPreserved: plugin?.preserved ?? [],
@@ -181,7 +227,11 @@ export async function applyMigration(preview: MigrationPreview, input: Pick<Migr
   }
 
   const fs = migrationFs(input.fs)
-  const currentTarget = await fs.readFile(preview.targetFile).catch(() => undefined)
+  const currentTargetRead = await readOptional(fs, preview.targetFile)
+  if (currentTargetRead.status === "error") {
+    return { ...preview, status: "refused", canApply: false, reason: "target_unreadable", error: errorMessage(currentTargetRead.error) }
+  }
+  const currentTarget = currentTargetRead.status === "ok" ? currentTargetRead.text : undefined
   if (
     (preview.targetExists && currentTarget === undefined) ||
     (!preview.targetExists && currentTarget !== undefined) ||
@@ -191,8 +241,17 @@ export async function applyMigration(preview: MigrationPreview, input: Pick<Migr
   }
 
   for (const source of preview.sourceFiles) {
-    const currentSource = await fs.readFile(source.path).catch(() => undefined)
-    if (currentSource === undefined || hash(currentSource) !== source.hash) {
+    const currentSourceRead = await readOptional(fs, source.path)
+    if (currentSourceRead.status === "error") {
+      return {
+        ...preview,
+        status: "refused",
+        canApply: false,
+        reason: "legacy_unreadable",
+        error: errorMessage(currentSourceRead.error),
+      }
+    }
+    if (currentSourceRead.status === "missing" || hash(currentSourceRead.text) !== source.hash) {
       return { ...preview, status: "refused", canApply: false, reason: "stale_preview" }
     }
   }
@@ -435,17 +494,38 @@ function mergeNested(left: Record<string, unknown>, right: Record<string, unknow
   return result
 }
 
-async function existingLegacyFiles(directory: string) {
-  const files = await Promise.all(
-    LEGACY_FILE_NAMES.map(async (name) => {
-      const file = path.join(directory, name)
-      return (await exists(file)) ? file : undefined
-    }),
-  )
-  return files.filter((file): file is string => file !== undefined)
+type DiscoveredSource = { path: string; scope: "global" | "project" }
+type DiscoveryResult = { files: DiscoveredSource[]; errors: MigrationSourceError[] }
+
+async function discoverLegacyFilesWithFs(input: MigrationInput, fs: Required<MigrationFs>): Promise<DiscoveryResult> {
+  const globalConfigDir = path.resolve(input.globalConfigDir ?? Flag.OPENCODE_CONFIG_DIR ?? Global.Path.config)
+  const projectRoot = path.resolve(input.projectDir ?? input.cwd ?? process.cwd())
+  const global = await existingLegacyFiles(globalConfigDir, "global", fs)
+  const project = await findProjectLegacyFiles(projectRoot, fs)
+  return {
+    files: [...global.files, ...project.files],
+    errors: [...global.errors, ...project.errors],
+  }
 }
 
-async function findProjectLegacyFiles(start: string) {
+async function existingLegacyFiles(directory: string, scope: "global" | "project", fs: Required<MigrationFs>) {
+  const files: string[] = []
+  const errors: MigrationSourceError[] = []
+  for (const name of LEGACY_FILE_NAMES) {
+    const file = path.join(directory, name)
+    try {
+      if (await fs.exists(file)) files.push(file)
+    } catch (error) {
+      errors.push({ path: file, scope, code: "legacy_unreadable", message: errorMessage(error) })
+    }
+  }
+  return {
+    files: files.map((file) => ({ path: file, scope })),
+    errors,
+  }
+}
+
+async function findProjectLegacyFiles(start: string, fs: Required<MigrationFs>): Promise<DiscoveryResult> {
   const directories: string[] = []
   let current = start
   while (true) {
@@ -454,15 +534,27 @@ async function findProjectLegacyFiles(start: string) {
     if (parent === current) break
     current = parent
   }
-  const files: string[] = []
-  for (const directory of directories.toReversed()) files.push(...(await existingLegacyFiles(directory)))
-  return files
+  const files: DiscoveredSource[] = []
+  const errors: MigrationSourceError[] = []
+  for (const directory of directories.toReversed()) {
+    const direct = await existingLegacyFiles(directory, "project", fs)
+    const nested = await existingLegacyFiles(path.join(directory, ".opencode"), "project", fs)
+    files.push(...direct.files, ...nested.files)
+    errors.push(...direct.errors, ...nested.errors)
+  }
+  return { files, errors }
 }
 
-async function defaultTargetFile(directory: string, fs: MigrationFs) {
+async function defaultTargetFile(directory: string, fs: Required<MigrationFs>) {
   const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((name) => path.resolve(directory, name))
-  for (const candidate of candidates) if (await (fs.exists ?? exists)(candidate)) return candidate
-  return candidates[0]
+  for (const candidate of candidates) {
+    try {
+      if (await fs.exists(candidate)) return { path: candidate }
+    } catch (error) {
+      return { path: candidate, error }
+    }
+  }
+  return { path: candidates[0] }
 }
 
 function parseLegacy(source: string) {
@@ -544,6 +636,30 @@ function migrationFs(input: MigrationFs = {}): Required<MigrationFs> {
     rm: input.rm ?? (async (file) => rm(file, { force: true }).then(() => undefined)),
     exists: input.exists ?? exists,
   }
+}
+
+type FileReadResult =
+  | { status: "missing" }
+  | { status: "ok"; text: string }
+  | { status: "error"; error: unknown }
+
+async function readOptional(fs: Required<MigrationFs>, file: string): Promise<FileReadResult> {
+  let present: boolean
+  try {
+    present = await fs.exists(file)
+  } catch (error) {
+    return { status: "error", error }
+  }
+  if (!present) return { status: "missing" }
+  try {
+    return { status: "ok", text: await fs.readFile(file) }
+  } catch (error) {
+    return isMissingError(error) ? { status: "missing" } : { status: "error", error }
+  }
+}
+
+function isMissingError(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
 }
 
 async function exists(file: string) {

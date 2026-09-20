@@ -59,6 +59,7 @@ export async function runOmoMigrate(args: OmoMigrateArgs, input: MigrationInput 
       targetExists: false,
       targetDiff: { set: [], removePlugins: [] },
       sourceFiles: [],
+      sourceErrors: [],
       native: {},
       normalized: {},
       imported: [],
@@ -96,7 +97,9 @@ type MigrationDisplay = {
   imported?: unknown
   unsupported?: unknown
   pluginRemovals?: unknown
+  sourceErrors?: unknown
   backupPath?: unknown
+  refusal?: unknown
   reason?: unknown
   error?: unknown
 }
@@ -116,14 +119,22 @@ export function formatMigrationText(result: MigrationDisplay) {
         .map((item) => `Remove ${item.path}: ${formatValue(item.value)}`)
         .join("\n")
     : ""
+  const sourceErrors = Array.isArray(result.sourceErrors)
+    ? result.sourceErrors
+        .filter(isSourceError)
+        .map((item) => `Source error: ${item.path} — ${item.message}`)
+        .join("\n")
+    : ""
   const lines = [
     `Status: ${typeof result.status === "string" ? result.status : "preview"}`,
     `Target: ${targetFile}`,
     `Imported: ${imported}`,
     unsupported,
     removals,
+    sourceErrors,
     `Backup: ${typeof result.backupPath === "string" ? result.backupPath : "none (target does not exist)"}`,
   ].filter(Boolean)
+  if (isRefusal(result.refusal)) lines.push(`Refusal: ${result.refusal.code} — ${result.refusal.message}`)
   if (typeof result.reason === "string") lines.push(`Reason: ${result.reason}`)
   if (typeof result.error === "string") lines.push(`Error: ${result.error}`)
   return `${lines.join("\n")}\n`
@@ -142,6 +153,21 @@ function isUnsupported(input: unknown): input is { path: string; message: string
 
 function isPluginRemoval(input: unknown): input is { path: string; value: unknown } {
   return typeof input === "object" && input !== null && "path" in input && typeof input.path === "string" && "value" in input
+}
+
+function isSourceError(input: unknown): input is { path: string; message: string } {
+  return isUnsupported(input)
+}
+
+function isRefusal(input: unknown): input is { code: string; message: string } {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    "code" in input &&
+    typeof input.code === "string" &&
+    "message" in input &&
+    typeof input.message === "string"
+  )
 }
 
 function formatValue(value: unknown) {

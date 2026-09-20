@@ -5,13 +5,17 @@ import path from "path"
 import {
   applyMigration,
   planMigration,
+  type MigrationFs,
   type MigrationPreview,
 } from "../../src/omo/migrate"
 
 const roots: string[] = []
+const originalConfigDir = process.env.OPENCODE_CONFIG_DIR
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
+  if (originalConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR
+  else process.env.OPENCODE_CONFIG_DIR = originalConfigDir
 })
 
 async function fixture() {
@@ -78,6 +82,98 @@ async function fixture() {
 }
 
 describe("native OMO migration planner", () => {
+  test("honors OPENCODE_CONFIG_DIR and project .opencode legacy files", async () => {
+    const input = await fixture()
+    const overrideDir = path.join(input.root, "override")
+    const projectConfigDir = path.join(input.projectDir, ".opencode")
+    await mkdir(overrideDir, { recursive: true })
+    await mkdir(projectConfigDir, { recursive: true })
+    await writeFile(path.join(overrideDir, "oh-my-opencode-slim.json"), JSON.stringify({ preset: "auto" }))
+    await writeFile(path.join(overrideDir, "opencode.json"), "{}\n")
+    await writeFile(path.join(projectConfigDir, "oh-my-opencode-slim.jsonc"), '{ "verification": "observer" }\n')
+    process.env.OPENCODE_CONFIG_DIR = overrideDir
+
+    const preview = await planMigration({ projectDir: input.projectDir })
+
+    expect(preview.targetFile).toBe(path.join(overrideDir, "opencode.json"))
+    expect(preview.sourceFiles.map((file) => file.path)).toEqual([
+      path.join(overrideDir, "oh-my-opencode-slim.json"),
+      path.join(input.projectDir, "oh-my-opencode-slim.jsonc"),
+      path.join(projectConfigDir, "oh-my-opencode-slim.jsonc"),
+    ])
+  })
+
+  test("uses injected existence and reads for virtual global and project config roots", async () => {
+    const globalConfigDir = path.resolve("virtual-global")
+    const projectDir = path.resolve("virtual-project")
+    const targetFile = path.join(globalConfigDir, "opencode.json")
+    const globalLegacy = path.join(globalConfigDir, "oh-my-opencode-slim.json")
+    const projectLegacy = path.join(projectDir, ".opencode", "oh-my-opencode-slim.jsonc")
+    const virtual = virtualFs({
+      [globalLegacy]: '{ "preset": "auto" }',
+      [projectLegacy]: '{ "verification": "tests" }',
+      [targetFile]: "{}\n",
+    })
+
+    const preview = await planMigration({ globalConfigDir, projectDir, targetFile, fs: virtual.fs })
+
+    expect(preview.sourceFiles.map((file) => file.path)).toEqual([globalLegacy, projectLegacy])
+    expect(virtual.checked).toContain(globalLegacy)
+    expect(virtual.checked).toContain(projectLegacy)
+    expect(virtual.checked).toContain(targetFile)
+  })
+
+  test("refuses invalid legacy JSON and never applies a partial projection", async () => {
+    const globalConfigDir = path.resolve("invalid-legacy-global")
+    const projectDir = path.resolve("invalid-legacy-project")
+    const source = path.join(globalConfigDir, "oh-my-opencode-slim.json")
+    const target = path.join(globalConfigDir, "opencode.json")
+    const virtual = virtualFs({ [source]: "{", [target]: "{\n  \"model\": \"x/y\"\n}\n" })
+
+    const preview = await planMigration({ globalConfigDir, projectDir, targetFile: target, fs: virtual.fs })
+
+    expect(preview.refusal?.code).toBe("invalid_legacy")
+    expect(preview.canApply).toBe(false)
+    expect((await applyMigration(preview)).status).toBe("refused")
+    expect(virtual.files[target]).toBe("{\n  \"model\": \"x/y\"\n}\n")
+  })
+
+  test("refuses unreadable legacy sources while treating ENOENT as missing", async () => {
+    const globalConfigDir = path.resolve("unreadable-legacy-global")
+    const projectDir = path.resolve("unreadable-legacy-project")
+    const unreadable = path.join(globalConfigDir, "oh-my-opencode-slim.json")
+    const missing = path.join(globalConfigDir, "oh-my-opencode-slim.jsonc")
+    const target = path.join(globalConfigDir, "opencode.json")
+    const accessDenied = Object.assign(new Error("access denied"), { code: "EACCES" })
+    const notFound = Object.assign(new Error("not found"), { code: "ENOENT" })
+    const virtual = virtualFs(
+      { [target]: "{}\n" },
+      { [unreadable]: accessDenied, [missing]: notFound },
+    )
+
+    const preview = await planMigration({ globalConfigDir, projectDir, targetFile: target, fs: virtual.fs })
+
+    expect(preview.refusal?.code).toBe("legacy_unreadable")
+    expect(preview.canApply).toBe(false)
+    expect((await applyMigration(preview)).status).toBe("refused")
+  })
+
+  test("refuses an unreadable target instead of treating it as a new file", async () => {
+    const globalConfigDir = path.resolve("unreadable-target-global")
+    const projectDir = path.resolve("unreadable-target-project")
+    const source = path.join(globalConfigDir, "oh-my-opencode-slim.json")
+    const target = path.join(globalConfigDir, "opencode.json")
+    const accessDenied = Object.assign(new Error("access denied"), { code: "EACCES" })
+    const virtual = virtualFs({ [source]: '{ "preset": "auto" }' }, { [target]: accessDenied })
+
+    const preview = await planMigration({ globalConfigDir, projectDir, targetFile: target, fs: virtual.fs })
+
+    expect(preview.refusal?.code).toBe("target_unreadable")
+    expect(preview.targetExists).toBe(true)
+    expect(preview.canApply).toBe(false)
+    expect((await applyMigration(preview)).status).toBe("refused")
+  })
+
   test("discovers global and project JSON/JSONC and returns a dry-run preview", async () => {
     const input = await fixture()
     const preview = await planMigration(input)
@@ -213,5 +309,32 @@ describe("native OMO migration planner", () => {
     expect(await readFile(input.targetFile, "utf8")).toBe(before)
   })
 })
+
+function virtualFs(files: Record<string, string>, failures: Record<string, Error> = {}) {
+  const checked: string[] = []
+  const fs: MigrationFs = {
+    exists: async (file) => {
+      checked.push(file)
+      return Object.hasOwn(files, file) || Object.hasOwn(failures, file)
+    },
+    readFile: async (file) => {
+      if (failures[file]) throw failures[file]
+      if (files[file] === undefined) throw Object.assign(new Error("not found"), { code: "ENOENT" })
+      return files[file]
+    },
+    writeFile: async (file, data) => {
+      files[file] = typeof data === "string" ? data : new TextDecoder().decode(data)
+    },
+    mkdir: async () => {},
+    rename: async (from, to) => {
+      files[to] = files[from] ?? ""
+      delete files[from]
+    },
+    rm: async (file) => {
+      delete files[file]
+    },
+  }
+  return { fs, files, checked }
+}
 
 void (undefined as unknown as MigrationPreview)

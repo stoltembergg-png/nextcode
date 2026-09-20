@@ -33,4 +33,17 @@ describe("omo migrate CLI", () => {
     expect(text).toContain("Remove plugin[0]: oh-my-opencode-slim@2.2.22")
     expect(text).toContain("Backup: C:/config/opencode.jsonc.omo-migration-123.bak")
   })
+
+  test("prints refusal details in the human preview", () => {
+    const text = formatMigrationText({
+      status: "preview",
+      targetFile: "C:/config/opencode.jsonc",
+      imported: [],
+      unsupported: [],
+      pluginRemovals: [],
+      refusal: { code: "legacy_unreadable", message: "legacy file denied" },
+    })
+
+    expect(text).toContain("Refusal: legacy_unreadable — legacy file denied")
+  })
 })
