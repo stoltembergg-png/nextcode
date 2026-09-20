@@ -1681,6 +1681,22 @@ export type SemifConfig = {
   server_path?: string
 }
 
+export type OmoPreset = "auto" | "openai" | "opencode-go"
+
+export type OmoAgentConfig = {
+  model?: string
+  variant?: string
+  permission?: {
+    [key: string]: unknown
+  }
+}
+
+export type OmoBackgroundPolicy = "auto" | "allow" | "deny"
+
+export type OmoRoutingPolicy = "auto" | "deterministic" | "semif"
+
+export type OmoVerification = "none" | "tests" | "oracle" | "observer"
+
 export type PermissionActionConfig = "ask" | "allow" | "deny"
 
 export type PermissionObjectConfig = {
@@ -1919,6 +1935,7 @@ export type Config = {
   logLevel?: LogLevel
   server?: ServerConfig
   semif?: SemifConfig
+  omo?: ConfigOmo
   command?: {
     [key: string]: {
       template: string
@@ -2111,6 +2128,20 @@ export type SemifStatus = {
     total?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   }
   error?: string
+}
+
+export type OmoLegacyPluginConflict = {
+  active: boolean
+  plugin?: string
+}
+
+export type OmoStatus = {
+  enabled: boolean
+  preset: OmoPreset
+  agents: Array<string>
+  semif: SemifStatus
+  conflict: OmoLegacyPluginConflict
+  last_failure?: string
 }
 
 export type Model = {
@@ -3905,6 +3936,18 @@ export type SyncEventSessionNextRevertCommitted = {
       messageID: string
     }
   }
+}
+
+export type ConfigOmo = {
+  enabled?: boolean
+  preset?: OmoPreset
+  agents?: {
+    [key: string]: OmoAgentConfig
+  }
+  disabled_agents?: Array<string>
+  background?: OmoBackgroundPolicy
+  routing?: OmoRoutingPolicy
+  verification?: OmoVerification
 }
 
 export type ConfigV2ReferenceGit = {
@@ -7544,6 +7587,31 @@ export type SemifAcquireResponses = {
 }
 
 export type SemifAcquireResponse = SemifAcquireResponses[keyof SemifAcquireResponses]
+
+export type OmoStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/omo/status"
+}
+
+export type OmoStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type OmoStatusError = OmoStatusErrors[keyof OmoStatusErrors]
+
+export type OmoStatusResponses = {
+  /**
+   * Native OMO status
+   */
+  200: OmoStatus
+}
+
+export type OmoStatusResponse = OmoStatusResponses[keyof OmoStatusResponses]
 
 export type EventSubscribeData = {
   body?: never

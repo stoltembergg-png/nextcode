@@ -44,6 +44,7 @@ import { DelegationService } from "@/omo/delegation"
 import { OmoDelegateTool } from "@/omo/delegate-tool"
 import { OmoObservability } from "@/omo/observability"
 import { OmoRouter } from "@/omo/router"
+import { OmoStatus } from "@/omo/status"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
@@ -103,6 +104,7 @@ import { providerHandlers } from "./handlers/provider"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { semifHandlers } from "./handlers/semif"
+import { omoHandlers } from "./handlers/omo"
 import { sessionHandlers } from "./handlers/session"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
@@ -146,7 +148,7 @@ const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provi
 const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
-  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, semifHandlers]),
+  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, semifHandlers, omoHandlers]),
   Layer.provide(schemaErrorLayer),
   Layer.provide(httpApiAuthLayer),
 )
@@ -278,6 +280,7 @@ const app = LayerNode.group([
   ApplicationTools.node,
   OmoObservability.node,
   OmoRouter.node,
+  OmoStatus.node,
   OmoDelegateTool.node,
 ])
 

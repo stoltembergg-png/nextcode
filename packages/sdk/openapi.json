@@ -685,6 +685,43 @@
         ]
       }
     },
+    "/omo/status": {
+      "get": {
+        "tags": ["omo"],
+        "operationId": "omo.status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Native OMO status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmoStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Get native OMO availability, configured agents, global SemIf state, legacy plugin conflicts, and the latest sanitized routing failure.",
+        "summary": "Get native OMO status",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.omo.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/event": {
       "get": {
         "tags": ["event"],
@@ -20904,6 +20941,13 @@
       "SemifDownload": {
         "$ref": "#/components/schemas/SemifDownload1"
       },
+      "SemifBackend1": {
+        "type": "string",
+        "enum": ["auto", "cpu", "cuda", "hip", "vulkan"]
+      },
+      "SemifBackend": {
+        "$ref": "#/components/schemas/SemifBackend1"
+      },
       "SemifConfig": {
         "type": "object",
         "properties": {
@@ -20912,6 +20956,9 @@
           },
           "download": {
             "$ref": "#/components/schemas/SemifDownload"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/SemifBackend"
           },
           "threads": {
             "type": "integer",
@@ -20947,6 +20994,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "OmoPreset": {
+        "type": "string",
+        "enum": ["auto", "openai", "opencode-go"]
+      },
+      "OmoAgentConfig": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "permission": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OmoBackgroundPolicy": {
+        "type": "string",
+        "enum": ["auto", "allow", "deny"]
+      },
+      "OmoRoutingPolicy": {
+        "type": "string",
+        "enum": ["auto", "deterministic", "semif"]
+      },
+      "OmoVerification": {
+        "type": "string",
+        "enum": ["none", "tests", "oracle", "observer"]
       },
       "PermissionActionConfig": {
         "type": "string",
@@ -21520,6 +21598,9 @@
           "semif": {
             "$ref": "#/components/schemas/SemifConfig"
           },
+          "omo": {
+            "$ref": "#/components/schemas/ConfigOmo"
+          },
           "command": {
             "type": "object",
             "additionalProperties": {
@@ -21978,6 +22059,35 @@
           "download": {
             "$ref": "#/components/schemas/SemifDownload1"
           },
+          "backend": {
+            "$ref": "#/components/schemas/SemifBackend1"
+          },
+          "backendRequested": {
+            "$ref": "#/components/schemas/SemifBackend1"
+          },
+          "backendFallback": {
+            "type": "boolean"
+          },
+          "backendFallbackReason": {
+            "type": "string",
+            "enum": [
+              "manual_cpu",
+              "platform_unsupported",
+              "mixed_gpus",
+              "no_amd_gpu",
+              "gpu_unsupported",
+              "missing_rocm_runtime",
+              "no_vendored_binary",
+              "hip_download_failed",
+              "unsupported_variant"
+            ]
+          },
+          "backendMessage": {
+            "type": "string"
+          },
+          "systemRuntimeMissing": {
+            "type": "boolean"
+          },
           "model": {
             "type": "object",
             "properties": {
@@ -22019,6 +22129,25 @@
             },
             "required": ["id", "filename", "sha256", "bytes", "quant"],
             "additionalProperties": false
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "quant": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "label", "quant"],
+              "additionalProperties": false
+            }
           },
           "modelPath": {
             "type": "string"
@@ -22135,7 +22264,60 @@
             "type": "string"
           }
         },
-        "required": ["status", "mode", "download", "host", "port", "adopted"],
+        "required": [
+          "status",
+          "mode",
+          "download",
+          "backend",
+          "backendRequested",
+          "backendFallback",
+          "systemRuntimeMissing",
+          "choices",
+          "host",
+          "port",
+          "adopted"
+        ],
+        "additionalProperties": false
+      },
+      "OmoLegacyPluginConflict": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "plugin": {
+            "type": "string"
+          }
+        },
+        "required": ["active"],
+        "additionalProperties": false
+      },
+      "OmoStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "preset": {
+            "$ref": "#/components/schemas/OmoPreset"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "semif": {
+            "$ref": "#/components/schemas/SemifStatus"
+          },
+          "conflict": {
+            "$ref": "#/components/schemas/OmoLegacyPluginConflict"
+          },
+          "last_failure": {
+            "type": "string"
+          }
+        },
+        "required": ["enabled", "preset", "agents", "semif", "conflict"],
         "additionalProperties": false
       },
       "Model": {
@@ -27594,6 +27776,39 @@
           }
         },
         "required": ["type", "id", "syncEvent"],
+        "additionalProperties": false
+      },
+      "ConfigOmo": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "preset": {
+            "$ref": "#/components/schemas/OmoPreset"
+          },
+          "agents": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmoAgentConfig"
+            }
+          },
+          "disabled_agents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "background": {
+            "$ref": "#/components/schemas/OmoBackgroundPolicy"
+          },
+          "routing": {
+            "$ref": "#/components/schemas/OmoRoutingPolicy"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/OmoVerification"
+          }
+        },
         "additionalProperties": false
       },
       "ConfigV2ReferenceGit": {
@@ -37391,6 +37606,10 @@
     {
       "name": "semif",
       "description": "Global SemIf model routes."
+    },
+    {
+      "name": "omo",
+      "description": "Native OMO status routes."
     },
     {
       "name": "event",
