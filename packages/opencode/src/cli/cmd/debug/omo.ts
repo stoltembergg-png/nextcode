@@ -4,6 +4,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Global } from "@opencode-ai/core/global"
 import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import type { LocationServices } from "@opencode-ai/core/location-services"
@@ -22,7 +23,9 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { makeGlobalNode, makeLocationNode, Node } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { DateTime, Effect, Layer, LayerMap, Ref } from "effect"
-import { EOL } from "os"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { EOL, tmpdir } from "node:os"
+import path from "node:path"
 import { CliError, effectCmd } from "../../effect-cmd"
 import { generateStrategies } from "../../../omo/strategy"
 import { routeDeterministic } from "../../../omo/deterministic"
@@ -56,6 +59,114 @@ const errors = {
   delegation: "OMO smoke: deterministic delegation failed",
   jobs: "OMO smoke: background job leaked",
 } as const
+
+const smokeEnvironmentKeys = [
+  "APPDATA",
+  "HOME",
+  "LOCALAPPDATA",
+  "USERPROFILE",
+  "OPENCODE_CONFIG",
+  "OPENCODE_CONFIG_DIR",
+  "OPENCODE_CONFIG_CONTENT",
+  "OPENCODE_DB",
+  "OPENCODE_DISABLE_MODELS_FETCH",
+  "OPENCODE_DISABLE_PROJECT_CONFIG",
+  "OPENCODE_PURE",
+  "OPENCODE_TEST_HOME",
+  "SEMIF_MODE",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+] as const
+
+const smokeGlobalPathKeys = ["data", "cache", "config", "state", "tmp", "bin", "log", "repos"] as const
+
+const smokeConfigContent = JSON.stringify({
+  $schema: "https://opencode.ai/config.json",
+  omo: {
+    enabled: true,
+    preset: "auto",
+    background: "allow",
+    routing: "deterministic",
+    verification: "tests",
+    disabled_agents: [],
+  },
+  subagent_depth: 1,
+})
+
+type SmokeEnvironment = {
+  readonly root: string
+  readonly previous: Readonly<Record<(typeof smokeEnvironmentKeys)[number], string | undefined>>
+  readonly previousPaths: Readonly<Record<(typeof smokeGlobalPathKeys)[number], string>>
+}
+
+function acquireSmokeEnvironment() {
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      const root = mkdtempSync(path.join(tmpdir(), "opencode-omo-smoke-"))
+      const config = path.join(root, "config")
+      const data = path.join(root, "data")
+      const cache = path.join(root, "cache")
+      const state = path.join(root, "state")
+      const home = path.join(root, "home")
+      const appData = path.join(root, "appdata")
+      const localAppData = path.join(root, "localappdata")
+      const tmp = path.join(root, "tmp")
+      const bin = path.join(root, "bin")
+      const log = path.join(root, "log")
+      const repos = path.join(root, "repos")
+      for (const directory of [config, data, cache, state, home, appData, localAppData, tmp, bin, log, repos]) {
+        mkdirSync(directory, { recursive: true })
+      }
+      writeFileSync(path.join(config, "opencode.json"), smokeConfigContent)
+
+      const previous = Object.fromEntries(
+        smokeEnvironmentKeys.map((key) => [key, process.env[key]]),
+      ) as SmokeEnvironment["previous"]
+      const previousPaths = Object.fromEntries(
+        smokeGlobalPathKeys.map((key) => [key, Global.Path[key]]),
+      ) as SmokeEnvironment["previousPaths"]
+      const values: Readonly<Partial<Record<(typeof smokeEnvironmentKeys)[number], string>>> = {
+        APPDATA: appData,
+        HOME: home,
+        LOCALAPPDATA: localAppData,
+        USERPROFILE: home,
+        OPENCODE_CONFIG: undefined,
+        OPENCODE_CONFIG_DIR: config,
+        OPENCODE_CONFIG_CONTENT: smokeConfigContent,
+        OPENCODE_DB: ":memory:",
+        OPENCODE_DISABLE_MODELS_FETCH: "1",
+        OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+        OPENCODE_PURE: "1",
+        OPENCODE_TEST_HOME: home,
+        SEMIF_MODE: "off",
+        XDG_CACHE_HOME: cache,
+        XDG_CONFIG_HOME: config,
+        XDG_DATA_HOME: data,
+        XDG_STATE_HOME: state,
+      }
+      for (const key of smokeEnvironmentKeys) {
+        const value = values[key]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      const isolatedPaths = { data, cache, config, state, tmp, bin, log, repos }
+      for (const key of smokeGlobalPathKeys) Global.Path[key] = isolatedPaths[key]
+      return { root, previous, previousPaths }
+    }),
+    (environment: SmokeEnvironment) =>
+      Effect.sync(() => {
+        for (const key of smokeGlobalPathKeys) Global.Path[key] = environment.previousPaths[key]
+        for (const key of smokeEnvironmentKeys) {
+          const value = environment.previous[key]
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+        rmSync(environment.root, { recursive: true, force: true, maxRetries: 2, retryDelay: 25 })
+      }),
+  )
+}
 
 type ForegroundCheck = {
   readonly ok: boolean
@@ -248,142 +359,141 @@ export function runOmoSmoke(overrides: OmoSmokeOverrides = {}): OmoSmokeReport {
  * database is reachable from this graph.
  */
 export function runOmoSmokeServices() {
-  process.env.OPENCODE_DISABLE_MODELS_FETCH = "true"
-  process.env.OPENCODE_PURE = "1"
-  process.env.SEMIF_MODE = "off"
-
-  return Effect.gen(function* () {
-    const scopeClosed = yield* Ref.make(false)
-    const disposalEvidence = {
-      background: yield* Ref.make(false),
-      execution: yield* Ref.make(false),
-      runner: yield* Ref.make(false),
-    }
-    const executionRef = yield* Ref.make<SessionExecution.Interface | undefined>(undefined)
-    const backgroundRef = yield* Ref.make<BackgroundJob.Interface | undefined>(undefined)
-    const report = yield* Effect.scoped(
-      Effect.gen(function* () {
-        yield* Effect.addFinalizer(() => Ref.set(scopeClosed, true))
-        const config = yield* Config.Service
-        const status = yield* OmoStatus.Service
-        const router = yield* OmoRouter.Service
-        const delegation = yield* DelegationService.Service
-        const sessions = yield* SessionV2.Service
-        const background = yield* BackgroundJob.Service
-        const execution = yield* SessionExecution.Service
-        yield* Ref.set(executionRef, execution)
-        yield* Ref.set(backgroundRef, background)
-        const metadataEvents: unknown[] = []
-        const currentConfig = yield* config.getGlobalReadOnly()
-        const resolvedConfig = ConfigOmo.resolve(currentConfig.omo).info
-        const location = Location.Ref.make({ directory: AbsolutePath.make(process.cwd().replaceAll("\\", "/")) })
-        const parent = yield* sessions.create({
-          location,
-          agent: AgentV2.ID.make("orchestrator"),
-          model: ModelV2.Ref.make({
-            providerID: ProviderV2.ID.make("controlled"),
-            id: ModelV2.ID.make("smoke"),
-          }),
-        })
-        const recommendation = yield* router.route({
-          summary: "Implement the packaged smoke test and run the tests now",
-          eligibleAgents: ConfigOmo.AgentIDs,
-          backgroundAvailable: true,
-          backgroundPolicy: resolvedConfig.background ?? "allow",
-          verification: "tests",
-          agent: "fixer",
-          background: false,
-          config: resolvedConfig,
-        })
-        const foreground = yield* delegation.delegate({
-          kind: "v2",
-          description: "OMO packaged smoke foreground",
-          prompt: "Run the deterministic foreground check.",
-          sessionID: parent.id,
-          agent: recommendation.agent,
-          background: false,
-          model: parent.model,
-          variant: parent.model?.variant,
-          abort: new AbortController().signal,
-          metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
-        })
-        const foregroundChild = yield* sessions.get(foreground.sessionID)
-        const backgroundRecommendation = yield* router.route({
-          summary: "Run the packaged smoke test in the background and report completion",
-          eligibleAgents: ConfigOmo.AgentIDs,
-          backgroundAvailable: true,
-          backgroundPolicy: resolvedConfig.background ?? "allow",
-          verification: "tests",
-          agent: "fixer",
-          background: true,
-          config: resolvedConfig,
-        })
-        const backgroundResult = yield* delegation.delegate({
-          kind: "v2",
-          description: "OMO packaged smoke background",
-          prompt: "Run the deterministic background check.",
-          sessionID: parent.id,
-          agent: backgroundRecommendation.agent,
-          background: true,
-          model: parent.model,
-          variant: parent.model?.variant,
-          abort: new AbortController().signal,
-          metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
-        })
-        if (!backgroundResult.background || !backgroundResult.jobID) throw new Error(errors.delegation)
-        const backgroundJob = yield* background.wait({ id: backgroundResult.jobID })
-        const activeJobs = yield* background.list()
-        const statusInfo = yield* status.status()
-        const backgroundChild = yield* sessions.get(backgroundResult.sessionID)
-        if (metadataEvents.length < 2) throw new Error(errors.delegation)
-        return buildServiceReport({
-          status: statusInfo,
-          agents: statusInfo.agents,
-          parentID: parent.id,
-          foreground: {
-            sessionID: foreground.sessionID,
-            state: foreground.state,
-            background: foreground.background,
-            agent: foregroundChild.agent,
-          },
-          background: {
-            sessionID: backgroundChild.id,
-            state: backgroundJob.info?.status === "completed" ? "completed" : "error",
+  return Effect.scoped(
+    Effect.gen(function* () {
+      yield* acquireSmokeEnvironment()
+      const scopeClosed = yield* Ref.make(false)
+      const disposalEvidence = {
+        background: yield* Ref.make(false),
+        execution: yield* Ref.make(false),
+        runner: yield* Ref.make(false),
+      }
+      const executionRef = yield* Ref.make<SessionExecution.Interface | undefined>(undefined)
+      const backgroundRef = yield* Ref.make<BackgroundJob.Interface | undefined>(undefined)
+      const report = yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.addFinalizer(() => Ref.set(scopeClosed, true))
+          const config = yield* Config.Service
+          const status = yield* OmoStatus.Service
+          const router = yield* OmoRouter.Service
+          const delegation = yield* DelegationService.Service
+          const sessions = yield* SessionV2.Service
+          const background = yield* BackgroundJob.Service
+          const execution = yield* SessionExecution.Service
+          yield* Ref.set(executionRef, execution)
+          yield* Ref.set(backgroundRef, background)
+          const metadataEvents: unknown[] = []
+          const currentConfig = yield* config.getGlobalReadOnly()
+          const resolvedConfig = ConfigOmo.resolve(currentConfig.omo).info
+          const location = Location.Ref.make({ directory: AbsolutePath.make(process.cwd().replaceAll("\\", "/")) })
+          const parent = yield* sessions.create({
+            location,
+            agent: AgentV2.ID.make("orchestrator"),
+            model: ModelV2.Ref.make({
+              providerID: ProviderV2.ID.make("controlled"),
+              id: ModelV2.ID.make("smoke"),
+            }),
+          })
+          const recommendation = yield* router.route({
+            summary: "Implement the packaged smoke test and run the tests now",
+            eligibleAgents: ConfigOmo.AgentIDs,
+            backgroundAvailable: true,
+            backgroundPolicy: resolvedConfig.background ?? "allow",
+            verification: "tests",
+            agent: "fixer",
+            background: false,
+            config: resolvedConfig,
+          })
+          const foreground = yield* delegation.delegate({
+            kind: "v2",
+            description: "OMO packaged smoke foreground",
+            prompt: "Run the deterministic foreground check.",
+            sessionID: parent.id,
+            agent: recommendation.agent,
+            background: false,
+            model: parent.model,
+            variant: parent.model?.variant,
+            abort: new AbortController().signal,
+            metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
+          })
+          const foregroundChild = yield* sessions.get(foreground.sessionID)
+          const backgroundRecommendation = yield* router.route({
+            summary: "Run the packaged smoke test in the background and report completion",
+            eligibleAgents: ConfigOmo.AgentIDs,
+            backgroundAvailable: true,
+            backgroundPolicy: resolvedConfig.background ?? "allow",
+            verification: "tests",
+            agent: "fixer",
             background: true,
-            agent: backgroundChild.agent,
-            started: backgroundResult.state === "running",
-            active_jobs: activeJobs.filter((job) => job.status === "running").length,
-          },
-          servicesDisposed: false,
-        })
-      }).pipe(Effect.provide(makeSmokeLayer(disposalEvidence))),
-    )
-    const servicesClosed = yield* Ref.get(scopeClosed)
-    const execution = yield* Ref.get(executionRef)
-    const background = yield* Ref.get(backgroundRef)
-    const backgroundFinalized = yield* Ref.get(disposalEvidence.background)
-    const executionFinalized = yield* Ref.get(disposalEvidence.execution)
-    const runnerFinalized = yield* Ref.get(disposalEvidence.runner)
-    const activeSessions = execution ? yield* execution.active : new Set<SessionV2.ID>()
-    const remainingJobs = background ? yield* background.list() : []
-    const servicesDisposed =
-      servicesClosed &&
-      backgroundFinalized &&
-      executionFinalized &&
-      runnerFinalized &&
-      execution !== undefined &&
-      background !== undefined &&
-      activeSessions.size === 0 &&
-      remainingJobs.every((job) => job.status !== "running")
-    if (!servicesDisposed) throw new Error(errors.jobs)
-    return {
-      ...report,
-      checks: {
-        ...report.checks,
-        disposal: { ...report.checks.disposal, services_disposed: servicesDisposed },
-      },
-    }
-  })
+            config: resolvedConfig,
+          })
+          const backgroundResult = yield* delegation.delegate({
+            kind: "v2",
+            description: "OMO packaged smoke background",
+            prompt: "Run the deterministic background check.",
+            sessionID: parent.id,
+            agent: backgroundRecommendation.agent,
+            background: true,
+            model: parent.model,
+            variant: parent.model?.variant,
+            abort: new AbortController().signal,
+            metadata: (input) => Effect.sync(() => metadataEvents.push(input)),
+          })
+          if (!backgroundResult.background || !backgroundResult.jobID) throw new Error(errors.delegation)
+          const backgroundJob = yield* background.wait({ id: backgroundResult.jobID })
+          const activeJobs = yield* background.list()
+          const statusInfo = yield* status.status()
+          const backgroundChild = yield* sessions.get(backgroundResult.sessionID)
+          if (metadataEvents.length < 2) throw new Error(errors.delegation)
+          return buildServiceReport({
+            status: statusInfo,
+            agents: statusInfo.agents,
+            parentID: parent.id,
+            foreground: {
+              sessionID: foreground.sessionID,
+              state: foreground.state,
+              background: foreground.background,
+              agent: foregroundChild.agent,
+            },
+            background: {
+              sessionID: backgroundChild.id,
+              state: backgroundJob.info?.status === "completed" ? "completed" : "error",
+              background: true,
+              agent: backgroundChild.agent,
+              started: backgroundResult.state === "running",
+              active_jobs: activeJobs.filter((job) => job.status === "running").length,
+            },
+            servicesDisposed: false,
+          })
+        }).pipe(Effect.provide(makeSmokeLayer(disposalEvidence))),
+      )
+      const servicesClosed = yield* Ref.get(scopeClosed)
+      const execution = yield* Ref.get(executionRef)
+      const background = yield* Ref.get(backgroundRef)
+      const backgroundFinalized = yield* Ref.get(disposalEvidence.background)
+      const executionFinalized = yield* Ref.get(disposalEvidence.execution)
+      const runnerFinalized = yield* Ref.get(disposalEvidence.runner)
+      const activeSessions = execution ? yield* execution.active : new Set<SessionV2.ID>()
+      const remainingJobs = background ? yield* background.list() : []
+      const servicesDisposed =
+        servicesClosed &&
+        backgroundFinalized &&
+        executionFinalized &&
+        runnerFinalized &&
+        execution !== undefined &&
+        background !== undefined &&
+        activeSessions.size === 0 &&
+        remainingJobs.every((job) => job.status !== "running")
+      if (!servicesDisposed) throw new Error(errors.jobs)
+      return {
+        ...report,
+        checks: {
+          ...report.checks,
+          disposal: { ...report.checks.disposal, services_disposed: servicesDisposed },
+        },
+      }
+    }),
+  )
 }
 
 export const OmoSmokeCommand = effectCmd({
@@ -557,6 +667,34 @@ const controlledSemif = Layer.succeed(
     dispose: () => Effect.void,
   }),
 )
+const smokeConfig = {
+  omo: {
+    enabled: true,
+    preset: "auto" as const,
+    background: "allow" as const,
+    routing: "deterministic" as const,
+    verification: "tests" as const,
+    disabled_agents: [],
+  },
+  plugin: [],
+  subagent_depth: 1,
+}
+const controlledConfig = Config.Service.of({
+  get: () => Effect.succeed(smokeConfig),
+  getGlobal: () => Effect.succeed(smokeConfig),
+  getGlobalReadOnly: () => Effect.succeed(smokeConfig),
+  getConsoleState: () =>
+    Effect.succeed({
+      consoleManagedProviders: [],
+      activeOrgName: undefined,
+      switchableOrgCount: 0,
+    }),
+  update: () => Effect.void,
+  updateGlobal: () => Effect.succeed({ info: smokeConfig, changed: false }),
+  invalidate: () => Effect.void,
+  directories: () => Effect.succeed([]),
+  waitForDependencies: () => Effect.void,
+})
 const nativeSmokeAgentLayer = Layer.effect(
   AgentV2.Service,
   Effect.gen(function* () {
@@ -586,6 +724,38 @@ type SmokeDisposalEvidence = {
 }
 
 function makeSmokeLayer(evidence: SmokeDisposalEvidence) {
+  const isolatedGlobalNode = makeGlobalNode({
+    service: Global.Service,
+    layer: Layer.effect(
+      Global.Service,
+      Effect.sync(() => {
+        const home = process.env.OPENCODE_TEST_HOME ?? path.dirname(process.cwd())
+        const data = process.env.XDG_DATA_HOME ?? path.join(home, "data")
+        const cache = process.env.XDG_CACHE_HOME ?? path.join(home, "cache")
+        const config = process.env.OPENCODE_CONFIG_DIR ?? path.join(home, "config")
+        const state = process.env.XDG_STATE_HOME ?? path.join(home, "state")
+        return Global.Service.of(
+          Global.make({
+            home,
+            data,
+            cache,
+            config,
+            state,
+            tmp: path.join(cache, "tmp"),
+            bin: path.join(cache, "bin"),
+            log: path.join(data, "log"),
+            repos: path.join(data, "repos"),
+          }),
+        )
+      }),
+    ),
+    deps: [],
+  })
+  const controlledConfigNode = LayerNode.make({
+    service: Config.Service,
+    layer: Layer.succeed(Config.Service, controlledConfig),
+    deps: [],
+  })
   const controlledRunnerNode = makeLocationNode({
     service: SessionRunner.Service,
     layer: Layer.effect(
@@ -704,8 +874,10 @@ function makeSmokeLayer(evidence: SmokeDisposalEvidence) {
     ]),
     [
       [BackgroundJob.node, backgroundNode],
+      [Config.node, controlledConfigNode],
       [Database.node, Database.layerFromPath(":memory:")],
       [DelegationService.node, nativeDelegationNode],
+      [Global.node, isolatedGlobalNode],
       [LocationServiceMap.node, smokeLocationMap],
       [SessionExecution.node, executionNode],
       [SemifService.node, controlledSemif],
