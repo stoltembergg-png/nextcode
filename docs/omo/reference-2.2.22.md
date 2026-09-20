@@ -138,8 +138,14 @@ overrides win field-by-field.
 | `opencode-go` | `explore` (reference `explorer`) | `opencode-go/deepseek-v4-flash` | `high` | approved |
 | `opencode-go` | `designer` | `opencode-go/kimi-k2.7-code` | — | approved |
 | `opencode-go` | `fixer` | `opencode-go/deepseek-v4-flash` | `high` | approved |
-| `opencode-go` | `observer` | `opencode-go/mimo-v2.5` | — | approved; enabling the preset also enables observer |
+| `opencode-go` | `observer` | `opencode-go/mimo-v2.5` | — | model mapping approved; native registration remains disabled until the user explicitly opts `observer` in through OMO configuration |
 | `auto` | all seven roles | session model unless overridden | session/provider value | approved native default; not a reference fixed-model preset |
+
+The pinned reference documents that an `opencode-go` installation may write
+`disabled_agents: []` to opt the otherwise-disabled `observer` role in. Native
+NextCode keeps that decision explicit: selecting the preset alone never
+registers `observer`; an OMO configuration change must opt it in. This avoids a
+surprising vision-model/provider requirement during a preset switch.
 
 `opencode-zen-free` is present in the reference repository but is not one of
 the approved native presets for this delivery. Custom reference presets,
