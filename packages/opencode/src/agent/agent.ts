@@ -1,6 +1,8 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Config } from "@/config/config"
+import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { agentDefinition, agentDefinitions } from "@opencode-ai/core/omo"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { Provider } from "@/provider/provider"
 
@@ -11,7 +13,6 @@ import { ProviderTransform } from "@/provider/transform"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
-import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
@@ -115,6 +116,7 @@ const layer = Layer.effect(
           "*": "ask",
           ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
         } satisfies Record<string, "allow" | "ask" | "deny">
+        const omoReadonlyExternalDirectory = Permission.fromConfig({ external_directory: readonlyExternalDirectory })
 
         const defaults = Permission.fromConfig({
           "*": "allow",
@@ -136,6 +138,8 @@ const layer = Layer.effect(
         })
 
         const user = Permission.fromConfig(cfg.permission ?? {})
+        const omo = ConfigOmo.resolve(cfg.omo).info
+        const legacyConflict = ConfigOmo.hasLegacyPluginConflict(cfg.plugin)
 
         const agents: Record<string, Info> = {
           build: {
@@ -211,7 +215,7 @@ const layer = Layer.effect(
               user,
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
-            prompt: PROMPT_EXPLORE,
+            prompt: agentDefinition("explore").prompt,
             options: {},
             mode: "subagent",
             native: true,
@@ -262,6 +266,45 @@ const layer = Layer.effect(
             ),
             prompt: PROMPT_SUMMARY,
           },
+        }
+
+        if (omo.enabled && !legacyConflict) {
+          for (const definition of agentDefinitions(omo)) {
+            const item = agents[definition.id]
+            if (item) {
+              item.description = definition.description
+              item.prompt = definition.prompt
+              item.mode = definition.mode
+              item.permission = Permission.merge(
+                item.permission,
+                legacyPermissions(definition.permissions),
+                omoReadonlyExternalDirectory,
+                legacyPermissions(definition.permissionOverrides ?? []),
+                user,
+              )
+              if (definition.model !== undefined) item.model = Provider.parseModel(definition.model)
+              item.variant = definition.variant ?? item.variant
+              continue
+            }
+
+            agents[definition.id] = {
+              name: definition.id,
+              description: definition.description,
+              prompt: definition.prompt,
+              options: {},
+              permission: Permission.merge(
+                defaults,
+                legacyPermissions(definition.permissions),
+                omoReadonlyExternalDirectory,
+                legacyPermissions(definition.permissionOverrides ?? []),
+                user,
+              ),
+              mode: definition.mode,
+              native: true,
+              ...(definition.model === undefined ? {} : { model: Provider.parseModel(definition.model) }),
+              ...(definition.variant === undefined ? {} : { variant: definition.variant }),
+            }
+          }
         }
 
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {
@@ -315,11 +358,16 @@ const layer = Layer.effect(
 
         const list = Effect.fnUntraced(function* () {
           const cfg = yield* config.get()
+          const defaultAgent = ConfigOmo.resolveDefaultAgent({
+            omo: cfg.omo,
+            default_agent: cfg.default_agent,
+            plugins: cfg.plugin,
+          }).id
           return pipe(
             agents,
             values(),
             sortBy(
-              [(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "build"), "desc"],
+              [(x) => x.name === defaultAgent, "desc"],
               [(x) => x.name, "asc"],
             ),
           )
@@ -327,11 +375,17 @@ const layer = Layer.effect(
 
         const defaultInfo = Effect.fnUntraced(function* () {
           const c = yield* config.get()
-          if (c.default_agent) {
-            const agent = agents[c.default_agent]
-            if (!agent) throw new Error(`default agent "${c.default_agent}" not found`)
-            if (agent.mode === "subagent") throw new Error(`default agent "${c.default_agent}" is a subagent`)
-            if (agent.hidden === true) throw new Error(`default agent "${c.default_agent}" is hidden`)
+          const defaultAgent = ConfigOmo.resolveDefaultAgent({
+            omo: c.omo,
+            default_agent: c.default_agent,
+            plugins: c.plugin,
+          }).id
+          const configured = c.default_agent !== undefined
+          if (configured || defaultAgent !== "build") {
+            const agent = agents[defaultAgent]
+            if (!agent) throw new Error(`default agent "${defaultAgent}" not found`)
+            if (agent.mode === "subagent") throw new Error(`default agent "${defaultAgent}" is a subagent`)
+            if (agent.hidden === true) throw new Error(`default agent "${defaultAgent}" is hidden`)
             return agent
           }
           const visible = Object.values(agents).find((a) => a.mode !== "subagent" && a.hidden !== true)
@@ -437,6 +491,16 @@ const layer = Layer.effect(
     })
   }),
 )
+
+function legacyPermissions(
+  rules: readonly { readonly action: string; readonly resource: string; readonly effect: PermissionV1.Action }[],
+): PermissionV1.Ruleset {
+  return rules.map((rule) => ({
+    permission: rule.action === "subagent" ? "task" : rule.action === "execute" ? "bash" : rule.action,
+    pattern: rule.resource,
+    action: rule.effect,
+  }))
+}
 
 const locationServiceMapNode = LayerNode.make({
   service: LocationServiceMap.Service,

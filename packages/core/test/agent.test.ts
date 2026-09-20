@@ -4,6 +4,9 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Location } from "@opencode-ai/core/location"
 import { AgentPlugin } from "@opencode-ai/core/plugin/agent"
+import { Config } from "@opencode-ai/core/config"
+import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
@@ -126,6 +129,84 @@ describe("AgentV2", () => {
       for (const item of agents) {
         expect(item.permissions.some((rule) => rule.action === "bash" && rule.effect !== "deny")).toBe(false)
       }
+    }),
+  )
+
+  it.effect("registers the shared native OMO roster and applies config overrides", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({
+                  preset: "openai",
+                  disabled_agents: ["librarian"],
+                  agents: {
+                    fixer: { model: "anthropic/claude-sonnet-4-6", permission: { edit: "deny" } },
+                  },
+                }),
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      const agents = yield* agent.all()
+      const names = agents.map((item) => String(item.id))
+      expect(names.filter((name) => name === "explore")).toHaveLength(1)
+      expect(names).toContain("orchestrator")
+      expect(names).toContain("oracle")
+      expect(names).toContain("designer")
+      expect(names).toContain("fixer")
+      expect(names).not.toContain("librarian")
+      expect(names).not.toContain("observer")
+
+      const orchestrator = yield* agent.get(AgentV2.ID.make("orchestrator"))
+      const explore = yield* agent.get(AgentV2.ID.make("explore"))
+      const fixer = yield* agent.get(AgentV2.ID.make("fixer"))
+      expect(orchestrator?.mode).toBe("primary")
+      expect(orchestrator?.model).toMatchObject({ providerID: "openai", id: "gpt-5.6-terra", variant: "high" })
+      expect(explore?.mode).toBe("subagent")
+      expect(fixer?.mode).toBe("subagent")
+      expect(fixer?.model).toMatchObject({ providerID: "anthropic", id: "claude-sonnet-4-6" })
+      expect(PermissionV2.evaluate("edit", "*", fixer?.permissions ?? []).effect).toBe("deny")
+      expect(yield* agent.default()).toMatchObject({ id: AgentV2.ID.make("orchestrator") })
+    }),
+  )
+
+  it.effect("suppresses native OMO agents when the legacy plugin is configured", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ plugins: ["oh-my-opencode-slim@2.2.22"] }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("orchestrator"))).toBeUndefined()
+      expect(yield* agent.default()).toMatchObject({ id: AgentV2.ID.make("build") })
     }),
   )
 })
