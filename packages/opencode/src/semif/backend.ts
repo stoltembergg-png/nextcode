@@ -8,7 +8,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 import { embeddedRocmLock, rocmRuntimeComplete, runtimeStageKey } from "../../script/fetch-rocm-runtime"
 import { hostTarget } from "../../script/fetch-semif-server"
-import { resolveSupportedGfx, unsupportedGfx } from "./gfx"
+import { isSupportedGfx, resolveSupportedGfx, unsupportedGfx } from "./gfx"
 import { rocmVendorSupported } from "./rocm-runtime"
 import { SemifPaths } from "./paths"
 
@@ -24,6 +24,7 @@ export type BackendFallbackReason =
   | "missing_rocm_runtime"
   | "no_vendored_binary"
   | "hip_download_failed"
+  | "vulkan_download_failed"
   | "unsupported_variant"
 
 export interface GpuInventory {
@@ -54,6 +55,8 @@ export interface ResolveInput {
   readonly hipDownloadFailed?: boolean
   readonly hipFetching?: boolean
   readonly rocmFetching?: boolean
+  readonly vulkanDownloadFailed?: boolean
+  readonly vulkanFetching?: boolean
 }
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
@@ -168,6 +171,17 @@ export function amdGpuUnsupportedForWinHip(
   if (`${platform}-${arch}` !== "win32-x64") return false
   if (!inventory.amdGfx) return false
   return !therockWinHipGfxSupported(inventory.amdGfx)
+}
+
+export function amdHipUnsupported(
+  inventory: GpuInventory,
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+  arch = process.arch,
+): boolean {
+  if (amdGpuUnsupportedForWinHip(inventory, platform, arch)) return true
+  if (inventory.amdGfx && !isSupportedGfx(inventory.amdGfx)) return true
+  return Boolean(unsupportedGfx(env, platform))
 }
 
 export function readGpuInventory(platform = process.platform): GpuInventory {
@@ -327,12 +341,23 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
     return activeCpu(input.requested, "manual_cpu", "semif: using CPU backend (configured)", inventory)
   }
 
-  if (input.requested === "cuda" || input.requested === "vulkan") {
+  if (input.requested === "cuda") {
     return fallbackCpu(
       input.requested,
       "unsupported_variant",
       `semif: ${input.requested} backend is not vendored yet; falling back to CPU`,
     )
+  }
+
+  if (input.requested === "vulkan") {
+    return resolveVulkan({
+      requested: "vulkan",
+      serverPath: input.serverPath,
+      env,
+      inventory,
+      vulkanDownloadFailed: input.vulkanDownloadFailed,
+      vulkanFetching: input.vulkanFetching,
+    })
   }
 
   if (input.requested === "hip") {
@@ -368,6 +393,17 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
 
   if (!inventory.amd) {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", inventory)
+  }
+
+  if (amdHipUnsupported(inventory, env)) {
+    return resolveVulkan({
+      requested: "auto",
+      serverPath: input.serverPath,
+      env,
+      inventory,
+      vulkanDownloadFailed: input.vulkanDownloadFailed,
+      vulkanFetching: input.vulkanFetching,
+    })
   }
 
   return resolveHip({
@@ -414,7 +450,9 @@ function resolveHip(input: {
     )
   }
 
-  const blockedGfx = unsupportedGfx(input.env)
+  const blockedGfx =
+    unsupportedGfx(input.env) ??
+    (input.inventory.amdGfx && !isSupportedGfx(input.inventory.amdGfx) ? input.inventory.amdGfx : undefined)
   if (blockedGfx) {
     return fallbackCpu(
       input.requested,
@@ -496,6 +534,67 @@ function resolveHip(input: {
   }
 }
 
+function resolveVulkan(input: {
+  readonly requested: BackendPreference
+  readonly serverPath?: string
+  readonly env: Record<string, string | undefined>
+  readonly inventory: GpuInventory
+  readonly vulkanDownloadFailed?: boolean
+  readonly vulkanFetching?: boolean
+}): BackendStatus {
+  if (!hipPlatformSupported()) {
+    return fallbackCpu(
+      input.requested,
+      "platform_unsupported",
+      "semif: Vulkan is only supported on Windows x64 and Ubuntu x64; using CPU",
+      input.inventory,
+    )
+  }
+
+  if (!input.inventory.amd) {
+    return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
+  }
+
+  if (input.vulkanDownloadFailed) {
+    return fallbackCpu(
+      input.requested,
+      "vulkan_download_failed",
+      "semif: Vulkan runtime download failed; using CPU backend",
+      input.inventory,
+    )
+  }
+
+  if (!vendoredBinaryExists("vulkan", input.serverPath, input.env)) {
+    if (input.vulkanFetching) {
+      return {
+        requested: input.requested,
+        active: "cpu",
+        fallback: false,
+        systemRuntimeMissing: false,
+        amdGpu: input.inventory.amd,
+        nvidiaGpu: input.inventory.nvidia,
+        message: "semif: fetching Vulkan runtime",
+      }
+    }
+    return fallbackCpu(
+      input.requested,
+      "no_vendored_binary",
+      "semif: vendored Vulkan llama-server binary is not available in this build; using CPU backend",
+      input.inventory,
+    )
+  }
+
+  return {
+    requested: input.requested,
+    active: "vulkan",
+    fallback: false,
+    systemRuntimeMissing: false,
+    amdGpu: input.inventory.amd,
+    nvidiaGpu: input.inventory.nvidia,
+    message: "semif: Vulkan backend active",
+  }
+}
+
 function activeCpu(
   requested: BackendPreference,
   reason: BackendFallbackReason,
@@ -537,12 +636,21 @@ export const hostTriple = hostTarget
 
 export function inspect(input: ResolveInput): BackendStatus {
   const status = resolveBackend(input)
-  if (status.active !== "hip") return status
-  if (vendoredBinaryExists("hip", input.serverPath, input.env)) return status
+  if (status.active === "hip") {
+    if (vendoredBinaryExists("hip", input.serverPath, input.env)) return status
+    return fallbackCpu(
+      input.requested,
+      "no_vendored_binary",
+      "semif: vendored HIP llama-server binary is not available; using CPU backend",
+      input.inventory ?? readGpuInventory(),
+    )
+  }
+  if (status.active !== "vulkan") return status
+  if (vendoredBinaryExists("vulkan", input.serverPath, input.env)) return status
   return fallbackCpu(
     input.requested,
     "no_vendored_binary",
-    "semif: vendored HIP llama-server binary is not available; using CPU backend",
+    "semif: vendored Vulkan llama-server binary is not available; using CPU backend",
     input.inventory ?? readGpuInventory(),
   )
 }
