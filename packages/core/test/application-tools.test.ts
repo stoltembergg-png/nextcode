@@ -66,6 +66,20 @@ describe("ApplicationTools", () => {
     }),
   )
 
+  it.effect("exposes omo_delegate through the native application carrier", () =>
+    Effect.gen(function* () {
+      const applications = yield* ApplicationTools.Service
+      const registry = yield* ToolRegistry.Service
+      const native = contextual([])
+
+      yield* applications.register({ omo_delegate: native })
+
+      expect(applications.entries().get("omo_delegate")?.tool).toBe(native)
+      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["omo_delegate"])
+      expect(yield* toolDefinitions(registry, [{ action: "omo_delegate", resource: "*", effect: "deny" }])).toEqual([])
+    }),
+  )
+
   it.effect("exposes narrow scoped Location registration and validates names", () =>
     Effect.gen(function* () {
       const tools: Tools.Interface = yield* Tools.Service

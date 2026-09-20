@@ -41,6 +41,9 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { SemifService } from "@/semif/service"
 import { DelegationService } from "@/omo/delegation"
+import { OmoDelegateTool } from "@/omo/delegate-tool"
+import { OmoObservability } from "@/omo/observability"
+import { OmoRouter } from "@/omo/router"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
@@ -68,6 +71,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
+import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@opencode-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
@@ -271,6 +275,10 @@ const app = LayerNode.group([
   ProjectCopy.node,
   PtyTicket.node,
   SemifService.node,
+  ApplicationTools.node,
+  OmoObservability.node,
+  OmoRouter.node,
+  OmoDelegateTool.node,
 ])
 
 export function createRoutes(
