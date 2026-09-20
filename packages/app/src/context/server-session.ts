@@ -232,7 +232,7 @@ export function createServerSession(
     }
     delete cache.part[messageID]
   }
-  const forgetOrphanParts = (sessionID: string, messageIDs?: Iterable<string>) => {
+  const untrackOrphan = (sessionID: string, messageIDs?: Iterable<string>) => {
     const orphans = orphanParts.get(sessionID)
     const ids = [...(messageIDs ?? orphans?.keys() ?? [])]
     if (ids.length === 0) return
@@ -247,16 +247,16 @@ export function createServerSession(
       orphanGcTimer = undefined
     }
   }
-  const clearOrphanParts = (sessionID: string, messageIDs?: Iterable<string>) => {
+  const deleteOrphanParts = (sessionID: string, messageIDs?: Iterable<string>) => {
     const orphans = orphanParts.get(sessionID)
-    const ids = [...(messageIDs ?? orphans?.keys() ?? [])]
+    const ids = [...(messageIDs ?? orphans?.keys() ?? [])].filter((messageID) => orphans?.has(messageID))
     if (ids.length === 0) return
     setData(
       produce((draft) => {
         ids.forEach((messageID) => deleteMessageParts(draft, messageID))
       }),
     )
-    forgetOrphanParts(sessionID, ids)
+    untrackOrphan(sessionID, ids)
   }
   const scheduleOrphanGc = () => {
     if (orphanGcTimer !== undefined || orphanPartCount === 0) return
@@ -268,7 +268,7 @@ export function createServerSession(
       orphanGcTimer = undefined
       const cutoff = Date.now() - orphanPartTtlMs
       for (const [sessionID, orphans] of orphanParts) {
-        clearOrphanParts(
+        deleteOrphanParts(
           sessionID,
           [...orphans].filter(([, created]) => created <= cutoff).map(([messageID]) => messageID),
         )
@@ -288,7 +288,10 @@ export function createServerSession(
             if (!oldest || created < oldest.created) oldest = { sessionID: oldSessionID, messageID: oldMessageID, created }
           }
         }
-        if (oldest) clearOrphanParts(oldest.sessionID, [oldest.messageID])
+        if (oldest) {
+          setData(produce((draft) => deleteMessageParts(draft, oldest.messageID)))
+          untrackOrphan(oldest.sessionID, [oldest.messageID])
+        }
       }
       orphanPartCount += 1
     }
@@ -559,7 +562,7 @@ export function createServerSession(
       messageLoads.delete(sessionID)
       v2.clear(sessionID)
       pendingParts.delete(sessionID)
-      clearOrphanParts(sessionID)
+      untrackOrphan(sessionID)
       removedMessages.delete(sessionID)
     })
     setData(
@@ -718,7 +721,7 @@ export function createServerSession(
       }
       const parts = reconcileFetched(fetched, data.part[item.id] ?? [], { touched })
       if (!parts.length) {
-        forgetOrphanParts(sessionID, [item.id])
+        untrackOrphan(sessionID, [item.id])
         setData(produce((draft) => deleteMessageParts(draft, item.id)))
         continue
       }
@@ -735,7 +738,7 @@ export function createServerSession(
         }),
       )
       setData("part", item.id, reconcile(parts, { key: "id" }))
-      forgetOrphanParts(sessionID, [item.id])
+      untrackOrphan(sessionID, [item.id])
     }
   }
 
@@ -744,7 +747,6 @@ export function createServerSession(
     page: MessagePage,
     load: MessageLoadState | undefined,
     preserveUnfetched: boolean | ((message: Message) => boolean),
-    cleanupOrphans: boolean,
   ) => {
     const source = page.source
       ? (() => {
@@ -786,13 +788,6 @@ export function createServerSession(
       if (source) setData("session_message", sessionID, reconcile(source))
       const messageIDs = replaceMessages(sessionID, messages)
       replaceParts(sessionID, merged.part, messageIDs, load)
-      const orphans = orphanParts.get(sessionID)
-      if (cleanupOrphans && page.complete && orphans) {
-        for (const messageID of orphans.keys()) {
-          if (!messageIDs.has(messageID)) clearOrphanParts(sessionID, [messageID])
-        }
-        if (orphanParts.get(sessionID)?.size === 0) orphanParts.delete(sessionID)
-      }
       setMeta("limit", sessionID, messages.length)
       setMeta("cursor", sessionID, merged.cursor)
       setMeta("complete", sessionID, merged.complete)
@@ -886,14 +881,14 @@ export function createServerSession(
         result,
         messageLoads.get(sessionID) === load ? load : undefined,
         preserveUnfetched,
-        mode !== "prepend",
       )
       applied = true
     } finally {
       if (!applied && generations.get(sessionID) === active && messageLoads.get(sessionID) === load) {
         for (const messageID of load.orphanParents) {
           if (!orphanParts.get(sessionID)?.has(messageID)) continue
-          clearOrphanParts(sessionID, [messageID])
+          setData(produce((draft) => deleteMessageParts(draft, messageID)))
+          untrackOrphan(sessionID, [messageID])
         }
         if (orphanParts.get(sessionID)?.size === 0) orphanParts.delete(sessionID)
       }
@@ -1054,12 +1049,29 @@ export function createServerSession(
 
   const apply = (event: { type: string; properties?: unknown }) => {
     if (event.type === "socket.closed" || event.type === "server.disconnected" || event.type === "global.disposed") {
-      for (const sessionID of [...orphanParts.keys()]) clearOrphanParts(sessionID)
+      for (const [sessionID, orphans] of orphanParts) {
+        setData(
+          produce((draft) => {
+            for (const messageID of orphans.keys()) deleteMessageParts(draft, messageID)
+          }),
+        )
+        untrackOrphan(sessionID)
+      }
       return
     }
     if (event.type === "session.aborted") {
       const sessionID = eventSessionID(event)
-      if (sessionID) clearOrphanParts(sessionID)
+      if (sessionID) {
+        const orphans = orphanParts.get(sessionID)
+        if (orphans) {
+          setData(
+            produce((draft) => {
+              for (const messageID of orphans.keys()) deleteMessageParts(draft, messageID)
+            }),
+          )
+          untrackOrphan(sessionID)
+        }
+      }
       return
     }
     const eventID = eventSessionID(event)
@@ -1117,7 +1129,7 @@ export function createServerSession(
           if (item.parts.length === 0) clearOptimistic(info.sessionID, info.id)
           if (item.parts.length > 0) items.set(info.id, { ...item, confirmedMessage: true })
         }
-        forgetOrphanParts(info.sessionID, [info.id])
+        untrackOrphan(info.sessionID, [info.id])
         const removedMessagesForSession = removedMessages.get(info.sessionID)
         removedMessagesForSession?.delete(info.id)
         if (removedMessagesForSession?.size === 0) removedMessages.delete(info.sessionID)

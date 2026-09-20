@@ -997,6 +997,19 @@ describe("server session", () => {
     expect(store.data.part[message.id]).toBeUndefined()
   })
 
+  test("does not delete parts written by a normal sync", async () => {
+    const message = userMessage("message")
+    const fresh = textPart(message.id, { text: "fresh" })
+    const store = createServerSession(
+      messageClient(response([{ info: message, parts: [] }]), response([{ info: message, parts: [fresh] }])),
+    )
+
+    await store.sync("child")
+    await store.sync("child", { force: true })
+
+    expect(store.data.part[message.id]).toEqual([fresh])
+  })
+
   test("clears delta buffers for parts omitted by the initial page", async () => {
     const pending = deferredResponse()
     const message = userMessage("message")
