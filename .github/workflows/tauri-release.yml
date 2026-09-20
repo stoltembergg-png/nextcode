@@ -141,7 +141,7 @@ jobs:
               *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
               *-vulkan) VARIANT=vulkan; BASE="${TARGET%-vulkan}" ;;
             esac
-            export NEXTCODE_SEMIF_MIRROR="https://github.com/${REPO}/releases/download/${MIRROR_TAG}/${NAME}"
+            # Dest URL 404s until this upload finishes. --download-only pulls ggml-org only.
             bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only
             cp "packages/desktop/src-tauri/.semif-cache/${ASSET}" "/tmp/${NAME}"
             gh release upload "$MIRROR_TAG" "/tmp/${NAME}" --clobber --repo "$REPO"

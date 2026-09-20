@@ -5,6 +5,8 @@
 //
 //   upstream: https://github.com/ggml-org/llama.cpp/releases/download/<tag>/<asset>
 //   mirror:   NEXTCODE_SEMIF_MIRROR (a URL to our own mirrored asset), tried first
+//   first publish: --download-only skips dest URLs (they 404 until uploaded)
+//                  and pulls ggml-org only. Duplicate dest/published URLs collapse.
 //
 // The archives carry `llama-server` plus its shared libraries (DLLs on Windows,
 // dylibs on macOS, shared objects on Linux). All libraries are staged together
@@ -92,10 +94,13 @@ export function downloadCandidates(
   entry: TargetLock,
   env: Record<string, string | undefined> = process.env,
 ): string[] {
-  const mirror = env.NEXTCODE_SEMIF_MIRROR?.trim()
   const upstream = `${UPSTREAM_BASE}/${lock.tag}/${entry.asset}`
+  // First-publish mirroring points NEXTCODE_SEMIF_MIRROR at the dest URL we are
+  // about to create. That URL 404s; skip dest candidates and pull ggml-org only.
+  if (env.NEXTCODE_SEMIF_UPSTREAM_ONLY?.trim()) return [upstream]
+  const mirror = env.NEXTCODE_SEMIF_MIRROR?.trim()
   const published = publishedMirrorUrl(lock, target, entry)
-  return [mirror, published, upstream].filter((url): url is string => Boolean(url))
+  return [...new Set([mirror, published, upstream].filter((url): url is string => Boolean(url)))]
 }
 
 export const HOST_TARGETS: Record<string, string> = {
@@ -168,7 +173,12 @@ export async function stageSemifServer(options: StageOptions = {}) {
   mkdirSync(cacheDir, { recursive: true })
   mkdirSync(binariesDir, { recursive: true })
 
-  const archive = await ensureArchive(lock, target, entry)
+  const archive = await ensureArchive(
+    lock,
+    target,
+    entry,
+    options.downloadOnly ? { NEXTCODE_SEMIF_UPSTREAM_ONLY: "1" } : process.env,
+  )
   console.log(`archive verified: ${archive} (${entry.bytes} bytes)`)
 
   if (options.downloadOnly) {
@@ -214,7 +224,14 @@ async function isUpToDate(markerPath: string, tag: string, entry: TargetLock): P
   return marker.staged.every((file) => existsSync(file.path) && statSync(file.path).size === file.bytes)
 }
 
-async function ensureArchive(lock: Lockfile, target: string, entry: TargetLock): Promise<string> {
+const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000
+
+async function ensureArchive(
+  lock: Lockfile,
+  target: string,
+  entry: TargetLock,
+  env: Record<string, string | undefined> = process.env,
+): Promise<string> {
   const archive = path.join(cacheDir, entry.asset)
   if (existsSync(archive)) {
     const cached = await inspect(archive)
@@ -223,12 +240,15 @@ async function ensureArchive(lock: Lockfile, target: string, entry: TargetLock):
     rmSync(archive, { force: true })
   }
 
-  const candidates = downloadCandidates(lock, target, entry)
+  const candidates = downloadCandidates(lock, target, entry, env)
 
   let lastError = `no download source available for ${entry.asset}`
   for (const url of candidates) {
     console.log(`downloading ${url}`)
-    const response = await fetch(url, { redirect: "follow" }).catch(() => undefined)
+    const response = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    }).catch(() => undefined)
     if (!response?.ok) {
       lastError = `download failed (${response ? response.status : "network error"}): ${url}`
       console.warn(lastError)
