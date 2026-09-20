@@ -70,7 +70,7 @@ test("suffixes vulkan lock keys and staging names", () => {
   expect(stagedServerName("x86_64-pc-windows-msvc", "vulkan", true)).toBe(
     "llama-server-x86_64-pc-windows-msvc-vulkan.exe",
   )
-  expect(stagedLibsDir("vulkan")).toMatch(/\/semif-vulkan$/)
+  expect(stagedLibsDir("vulkan").replaceAll("\\", "/")).toMatch(/\/semif-vulkan$/)
 })
 
 test("embedded lockfile pins vulkan targets for windows and linux triples", () => {

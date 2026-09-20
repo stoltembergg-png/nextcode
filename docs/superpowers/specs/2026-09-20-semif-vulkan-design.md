@@ -31,7 +31,7 @@ NextCode must make SemIf GPU work without the user:
 
 The app downloads, verifies, stages, and launches. Default `semif.mode` / `semif.download` stay `auto`.
 
-Irreducible floor (same class as “a GPU driver exists”): a functioning AMD display driver. Windows Adrenalin for RX 580 already registers a Vulkan ICD. NextCode does not install GPU drivers. It does not tell the user to install a SDK. If the ICD is absent, SemIf stays on CPU with a status reason — never a setup checklist.
+Irreducible floor (same class as “a GPU driver exists”): a functioning AMD display driver. Windows Adrenalin for RX 580 already registers a Vulkan ICD. NextCode does not install GPU drivers. It does not tell the user to install a SDK. If the ICD loader (`vulkan-1.dll` / `libvulkan.so.1`) is absent, SemIf stays on CPU with `missing_vulkan_runtime` — never a setup checklist. Sidecar spawn or init failure uses the existing `failed` status (same as HIP); it is not a second Vulkan-specific fallback reason.
 
 ## Selection
 
@@ -72,11 +72,11 @@ This is required for the RX 580 to actually hold the GGUF in VRAM (~700 MB for
 
 ## Runtime layout
 
-`SemifRuntime.materialize` already colocates launcher + DLLs/SOs so ggml finds `ggml-vulkan` next to the executable. Stage the whole Vulkan archive through the existing extract filters (Windows: `llama-server.exe` + `*.dll`; Linux: `llama-server` + `*.so*`). Task 1 of the implementation plan lists archive members after download; if `vulkan-1.dll` / `libvulkan.so.1` ship in the zip they are staged automatically. If they do not, the process still spawns with `cwd` = runtime dir and `extendEnv: true` so a driver-provided loader resolves. No PATH mutation.
+`SemifRuntime.materialize` already colocates launcher + DLLs/SOs so ggml finds `ggml-vulkan` next to the executable. Stage the whole Vulkan archive through the existing extract filters (Windows: `llama-server.exe` + `*.dll`; Linux: `llama-server` + `*.so*`). Task 1 of the implementation plan lists archive members after download; if `vulkan-1.dll` / `libvulkan.so.1` ship in the zip they are staged automatically. If they do not, the process still spawns with `cwd` = runtime dir so Windows DLL search finds colocated ggml backends; Linux relies on the binary `$ORIGIN` RPATH/RUNPATH for those local SOs. The driver ICD loader is resolved from system paths (`vulkan-1.dll` / `libvulkan.so.1`), not from `cwd` or `extendEnv: true`. Do not set `LD_LIBRARY_PATH` and do not mutate PATH.
 
 ## Status and UI
 
-New fallback reason: `vulkan_download_failed`.
+New fallback reasons: `vulkan_download_failed`, `missing_vulkan_runtime` (ICD loader absent). Sidecar init failure remains `failed`, not a Vulkan-only reason.
 
 Do not reuse `gpu_unsupported` as the terminal auto state for Polaris. That reason remains for explicit `hip` on a rejected GPU.
 
@@ -85,6 +85,8 @@ UI (`packages/app/src/components/semif-backend-status.ts`):
 - `vulkan_active` — success dot, copy “Vulkan active”
 - fetch in progress — warning dot, “Installing Vulkan runtime” / “Verifying Vulkan runtime”
 - `vulkan_download_failed` — warning, CPU fallback copy
+- `missing_vulkan_runtime` — warning, CPU fallback copy (ICD loader absent)
+- sidecar spawn/init failure — `failed` (same as HIP)
 - explicit `hip` + `gpu_unsupported` — unchanged designer copy
 
 After `HttpApi` reason literals change, run `bun run generate` from `packages/client`. Do not edit `src/generated` by hand.
@@ -99,7 +101,7 @@ Unit tests (no GPU required):
 - sidecar args include `-ngl 99` only when `nGpuLayers` is set
 - lockfile pins vulkan targets; fetch-script `lockTargetKey(..., "vulkan")`
 - i18n parity
-- HttpApi schema includes `vulkan_download_failed`
+- HttpApi schema includes `vulkan_download_failed` and `missing_vulkan_runtime`
 
 Acceptance (optional, real RX 580): after warmup, `/semif/status` shows `backend: "vulkan"`, `backendFallback: false`, and `semif_decide` returns a chosen option. Not required to merge.
 
