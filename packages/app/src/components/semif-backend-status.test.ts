@@ -7,6 +7,7 @@ import {
   semifBackendMessageKey,
   semifHipFetchInProgress,
   semifLifecycleStatusKey,
+  semifVulkanFetchInProgress,
 } from "./semif-backend-status"
 
 const base = (): SemifStatus => ({
@@ -304,6 +305,48 @@ describe("semifLifecycleStatusKey", () => {
         backendFallback: false,
       }),
     ).toBe("semif.state.downloading")
+  })
+})
+
+describe("semifVulkanFetchInProgress", () => {
+  test("detects vulkan fetch in progress", () => {
+    expect(
+      semifVulkanFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backend: "cpu",
+        backendRequested: "auto",
+        backendFallback: false,
+      }),
+    ).toBe(true)
+  })
+
+  test("gpu_unsupported hip fetch is still skipped", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backendFallbackReason: "gpu_unsupported",
+        backendRequested: "hip",
+      }),
+    ).toBe(false)
+  })
+})
+
+describe("semifBackendDisplayState vulkan", () => {
+  test("reports vulkan active", () => {
+    expect(
+      semifBackendDisplayState({
+        ...base(),
+        backend: "vulkan",
+        backendRequested: "auto",
+        backendFallback: false,
+      }),
+    ).toBe("vulkan_active")
+    expect(semifBackendMessageKey({ ...base(), backend: "vulkan", backendFallback: false })).toBe(
+      "semif.backend.vulkan_active",
+    )
+    expect(semifBackendDotClass("vulkan_active")).toBe("bg-icon-success-base")
   })
 })
 
