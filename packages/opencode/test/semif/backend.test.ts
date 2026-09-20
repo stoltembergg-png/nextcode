@@ -4,14 +4,117 @@ import path from "node:path"
 import { tmpdir } from "node:os"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 import {
+  amdGpuUnsupportedForWinHip,
+  gfxFromAmdDeviceId,
   hipPlatformSupported,
   resolveBackend,
   rocmRuntimePresentAt,
   rocmRuntimeSearchPaths,
+  therockWinHipGfxSupported,
 } from "../../src/semif/backend"
 import { SERVER_ENV } from "../../src/semif/paths"
 
 describe("semif backend", () => {
+  test("gfxFromAmdDeviceId maps Polaris RX 580 to gfx803", () => {
+    expect(gfxFromAmdDeviceId("0x67df")).toBe("gfx803")
+    expect(gfxFromAmdDeviceId("67df")).toBe("gfx803")
+    expect(gfxFromAmdDeviceId("0xffff")).toBeUndefined()
+  })
+
+  test("therockWinHipGfxSupported accepts RDNA families only", () => {
+    expect(therockWinHipGfxSupported("gfx1030")).toBe(true)
+    expect(therockWinHipGfxSupported("gfx1100")).toBe(true)
+    expect(therockWinHipGfxSupported("gfx1151")).toBe(true)
+    expect(therockWinHipGfxSupported("gfx1200")).toBe(true)
+    expect(therockWinHipGfxSupported("gfx803")).toBe(false)
+    expect(therockWinHipGfxSupported("gfx900")).toBe(false)
+  })
+
+  test("amdGpuUnsupportedForWinHip is win32-only and requires known gfx", () => {
+    expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx803" }, "win32", "x64")).toBe(true)
+    expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx1030" }, "win32", "x64")).toBe(false)
+    expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false }, "win32", "x64")).toBe(false)
+    expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx803" }, "linux", "x64")).toBe(false)
+  })
+
+  test("known unsupported gfx settles before HIP fetch on win32", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gpu-unsupported-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const inventory = { amd: true, nvidia: false, amdGfx: "gfx803" }
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory,
+        rocmRuntimePresent: true,
+        hipFetching: true,
+      })
+      if (process.platform === "win32") {
+        expect(status.active).toBe("cpu")
+        expect(status.fallbackReason).toBe("gpu_unsupported")
+        expect(status.message).toContain("gfx803")
+        return
+      }
+      expect(status.fallbackReason).not.toBe("gpu_unsupported")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("unknown amd gfx keeps existing HIP path", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-gfx-unknown-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    writeFileSync(cpu, "cpu")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false },
+        rocmRuntimePresent: true,
+        hipFetching: true,
+      })
+      expect(status.fallbackReason).not.toBe("gpu_unsupported")
+      expect(status.message).toContain("fetching HIP runtime")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("supported gfx does not collide with mixed_gpus or no_amd_gpu", () => {
+    if (!hipPlatformSupported()) return
+    const supported = resolveBackend({
+      requested: "auto",
+      inventory: { amd: true, nvidia: false, amdGfx: "gfx1030" },
+      rocmRuntimePresent: true,
+    })
+    expect(supported.fallbackReason).not.toBe("gpu_unsupported")
+    expect(supported.fallbackReason).not.toBe("mixed_gpus")
+    expect(supported.fallbackReason).not.toBe("no_amd_gpu")
+
+    const mixed = resolveBackend({
+      requested: "auto",
+      inventory: { amd: true, nvidia: true, amdGfx: "gfx803" },
+      rocmRuntimePresent: true,
+    })
+    expect(mixed.fallbackReason).toBe("mixed_gpus")
+
+    const noAmd = resolveBackend({
+      requested: "auto",
+      inventory: { amd: false, nvidia: false },
+      rocmRuntimePresent: true,
+    })
+    expect(noAmd.fallbackReason).toBe("no_amd_gpu")
+  })
+
   test("manual cpu is active without fallback", () => {
     const status = resolveBackend({
       requested: "cpu",

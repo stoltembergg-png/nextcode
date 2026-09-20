@@ -137,6 +137,16 @@ describe("semifBackendDisplayState", () => {
     ).toBe("cpu_fallback")
   })
 
+  test("reports gpu_unsupported separately from download-related fallbacks", () => {
+    expect(
+      semifBackendDisplayState({
+        ...base(),
+        backendFallback: true,
+        backendFallbackReason: "gpu_unsupported",
+      }),
+    ).toBe("gpu_unsupported")
+  })
+
   test("returns undefined when no backend state should be shown", () => {
     expect(semifBackendDisplayState(base())).toBeUndefined()
   })
@@ -147,6 +157,7 @@ describe("semifBackendFallbackI18nKey", () => {
     expect(semifBackendFallbackI18nKey("no_vendored_binary")).toBe("semif.backend.fallback.no_vendored_binary")
     expect(semifBackendFallbackI18nKey("missing_rocm_runtime")).toBe("semif.backend.fallback.missing_rocm_runtime")
     expect(semifBackendFallbackI18nKey("hip_download_failed")).toBe("semif.backend.fallback.hip_download_failed")
+    expect(semifBackendFallbackI18nKey("gpu_unsupported")).toBe("semif.backend.fallback.gpu_unsupported")
   })
 
   test("uses unknown key when reason is missing", () => {
@@ -229,6 +240,25 @@ describe("semifBackendMessageKey", () => {
       }),
     ).toBe("semif.backend.fallback.hip_download_failed")
   })
+
+  test("selects gpu_unsupported copy instead of HIP fetch messaging", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "gpu_unsupported",
+      }),
+    ).toBe("semif.backend.fallback.gpu_unsupported")
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backendFallback: true,
+        backendFallbackReason: "gpu_unsupported",
+      }),
+    ).toBe(false)
+  })
 })
 
 describe("semifLifecycleStatusKey", () => {
@@ -286,5 +316,9 @@ describe("semifBackendDotClass", () => {
     expect(semifBackendDotClass("hip_fetch_in_progress")).toBe("bg-icon-warning-base")
     expect(semifBackendDotClass("cpu_fallback")).toBe("bg-icon-warning-base")
     expect(semifBackendDotClass("system_runtime_missing")).toBe("bg-icon-warning-base")
+  })
+
+  test("uses neutral styling for gpu_unsupported", () => {
+    expect(semifBackendDotClass("gpu_unsupported")).toBe("bg-border-weak-base")
   })
 })

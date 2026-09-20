@@ -17,6 +17,7 @@ export type BackendFallbackReason =
   | "platform_unsupported"
   | "mixed_gpus"
   | "no_amd_gpu"
+  | "gpu_unsupported"
   | "missing_rocm_runtime"
   | "no_vendored_binary"
   | "hip_download_failed"
@@ -25,6 +26,8 @@ export type BackendFallbackReason =
 export interface GpuInventory {
   readonly amd: boolean
   readonly nvidia: boolean
+  // AMD gfx arch (e.g. gfx803, gfx1030) when probed from PCI device id; omitted when unknown.
+  readonly amdGfx?: string
 }
 
 export interface BackendStatus {
@@ -51,6 +54,83 @@ export interface ResolveInput {
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
 
+// TheRock Windows HIP redistributable families (RDNA1+). Polaris/Vega and other
+// pre-gfx101X arches are outside this matrix (e.g. RX 580 = gfx803).
+const THEROCK_WIN_HIP_GFX_PREFIXES = ["gfx101", "gfx103", "gfx110", "gfx115", "gfx120"] as const
+
+// Common AMD PCI device ids → gfx arch. Unknown ids stay unmapped so we never
+// falsely mark a host unsupported.
+const AMD_PCI_GFX: Record<string, string> = {
+  "0x67c0": "gfx803",
+  "0x67c1": "gfx803",
+  "0x67c2": "gfx803",
+  "0x67c4": "gfx803",
+  "0x67c7": "gfx803",
+  "0x67cf": "gfx803",
+  "0x67d0": "gfx803",
+  "0x67df": "gfx803",
+  "0x67e0": "gfx803",
+  "0x67e3": "gfx803",
+  "0x67e8": "gfx803",
+  "0x67e9": "gfx803",
+  "0x67ef": "gfx803",
+  "0x67ff": "gfx803",
+  "0x6fd8": "gfx803",
+  "0x6fd9": "gfx803",
+  "0x6fdc": "gfx803",
+  "0x6fdd": "gfx803",
+  "0x6fde": "gfx803",
+  "0x6fdf": "gfx803",
+  "0x6860": "gfx900",
+  "0x6861": "gfx901",
+  "0x6862": "gfx902",
+  "0x6863": "gfx902",
+  "0x6864": "gfx902",
+  "0x6867": "gfx900",
+  "0x6868": "gfx900",
+  "0x6869": "gfx900",
+  "0x687f": "gfx900",
+  "0x66a0": "gfx906",
+  "0x66a1": "gfx906",
+  "0x66a2": "gfx906",
+  "0x66a3": "gfx906",
+  "0x7310": "gfx1010",
+  "0x7312": "gfx1012",
+  "0x7318": "gfx1013",
+  "0x7319": "gfx1012",
+  "0x731a": "gfx1013",
+  "0x731b": "gfx1013",
+  "0x731e": "gfx1011",
+  "0x731f": "gfx1010",
+  "0x73a0": "gfx1030",
+  "0x73a1": "gfx1030",
+  "0x73a2": "gfx1030",
+  "0x73a3": "gfx1030",
+  "0x73ab": "gfx1031",
+  "0x73ae": "gfx1030",
+  "0x73af": "gfx1030",
+  "0x73bf": "gfx1030",
+  "0x73df": "gfx1031",
+  "0x73e0": "gfx1032",
+  "0x73e1": "gfx1032",
+  "0x73e2": "gfx1032",
+  "0x73e3": "gfx1032",
+  "0x744c": "gfx1100",
+  "0x7470": "gfx1101",
+  "0x7478": "gfx1102",
+  "0x747e": "gfx1101",
+  "0x7480": "gfx1100",
+  "0x7481": "gfx1100",
+  "0x7483": "gfx1100",
+  "0x7489": "gfx1103",
+  "0x150e": "gfx1150",
+  "0x1586": "gfx1151",
+  "0x1587": "gfx1151",
+  "0x7440": "gfx1200",
+  "0x7441": "gfx1200",
+  "0x7442": "gfx1201",
+}
+
 // Linux ggml-hip links against the system ROCm stack. The vendored archive omits
 // these libraries and expects them from /opt/rocm or the loader search path.
 export const ROCM_RUNTIME_LIBS_LINUX = ["libhipblas.so.3", "librocblas.so.5", "libamdhip64.so.7"] as const
@@ -65,6 +145,27 @@ export function hipPlatformSupported(platform = process.platform, arch = process
   return HIP_HOSTS.has(`${platform}-${arch}`)
 }
 
+export function gfxFromAmdDeviceId(deviceId: string): string | undefined {
+  const normalized = deviceId.trim().toLowerCase()
+  const prefixed = normalized.startsWith("0x") ? normalized : `0x${normalized}`
+  return AMD_PCI_GFX[prefixed]
+}
+
+export function therockWinHipGfxSupported(gfx: string): boolean {
+  const normalized = gfx.trim().toLowerCase()
+  return THEROCK_WIN_HIP_GFX_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+}
+
+export function amdGpuUnsupportedForWinHip(
+  inventory: GpuInventory,
+  platform = process.platform,
+  arch = process.arch,
+): boolean {
+  if (`${platform}-${arch}` !== "win32-x64") return false
+  if (!inventory.amdGfx) return false
+  return !therockWinHipGfxSupported(inventory.amdGfx)
+}
+
 export function readGpuInventory(platform = process.platform): GpuInventory {
   if (platform === "linux") return readLinuxGpuInventory()
   if (platform === "win32") return readWindowsGpuInventory()
@@ -72,22 +173,58 @@ export function readGpuInventory(platform = process.platform): GpuInventory {
 }
 
 function readLinuxGpuInventory(): GpuInventory {
-  const inventory = { amd: false, nvidia: false }
+  const inventory = { amd: false, nvidia: false, amdGfx: undefined as string | undefined }
   const drm = "/sys/class/drm"
   if (!existsSync(drm)) return inventory
   for (const entry of readdirSync(drm)) {
-    if (!entry.startsWith("card")) continue
-    const vendorPath = path.join(drm, entry, "device", "vendor")
+    if (!/^card\d+$/.test(entry)) continue
+    const deviceDir = path.join(drm, entry, "device")
+    const vendorPath = path.join(deviceDir, "vendor")
     if (!existsSync(vendorPath)) continue
     const vendor = readFileSync(vendorPath, "utf8").trim().toLowerCase()
-    if (vendor === "0x1002") inventory.amd = true
+    if (vendor === "0x1002") {
+      inventory.amd = true
+      const devicePath = path.join(deviceDir, "device")
+      if (existsSync(devicePath) && !inventory.amdGfx) {
+        inventory.amdGfx = gfxFromAmdDeviceId(readFileSync(devicePath, "utf8").trim())
+      }
+    }
     if (vendor === "0x10de") inventory.nvidia = true
   }
   return inventory
 }
 
+let cachedWindowsAmdDeviceIds: string[] | undefined
+
+function readWindowsAmdDeviceIds(): string[] {
+  if (cachedWindowsAmdDeviceIds) return cachedWindowsAmdDeviceIds
+  const result = Bun.spawnSync({
+    cmd: [
+      "powershell",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-CimInstance Win32_VideoController | Where-Object { $_.PNPDeviceID -match 'VEN_1002' } | ForEach-Object { $_.PNPDeviceID }",
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: 3000,
+  })
+  if (!result.success) return []
+  const ids = result.stdout
+    .toString("utf8")
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/DEV_([0-9A-Fa-f]{4})/)
+      return match ? `0x${match[1].toLowerCase()}` : undefined
+    })
+    .filter((id): id is string => Boolean(id))
+  cachedWindowsAmdDeviceIds = ids
+  return ids
+}
+
 function readWindowsGpuInventory(): GpuInventory {
-  const inventory = { amd: false, nvidia: false }
+  const inventory = { amd: false, nvidia: false, amdGfx: undefined as string | undefined }
   const system32 = "C:\\Windows\\System32"
   if (existsSync(path.join(system32, "nvcuda.dll"))) inventory.nvidia = true
   if (existsSync(path.join(system32, "nvapi64.dll"))) inventory.nvidia = true
@@ -100,6 +237,10 @@ function readWindowsGpuInventory(): GpuInventory {
   const programFilesAmd = process.env["ProgramFiles"] ? path.join(process.env["ProgramFiles"], "AMD") : undefined
   if (programFilesAmd && existsSync(programFilesAmd)) inventory.amd = true
   if (process.env.ROCM_PATH && existsSync(process.env.ROCM_PATH)) inventory.amd = true
+  for (const deviceId of readWindowsAmdDeviceIds()) {
+    inventory.amd = true
+    if (!inventory.amdGfx) inventory.amdGfx = gfxFromAmdDeviceId(deviceId)
+  }
   return inventory
 }
 
@@ -247,6 +388,15 @@ function resolveHip(input: {
 
   if (!input.inventory.amd) {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
+  }
+
+  if (amdGpuUnsupportedForWinHip(input.inventory)) {
+    return fallbackCpu(
+      input.requested,
+      "gpu_unsupported",
+      `semif: AMD GPU ${input.inventory.amdGfx} is outside the supported Windows HIP matrix (e.g. Polaris/RX 580); using CPU backend`,
+      input.inventory,
+    )
   }
 
   if (input.hipDownloadFailed) {

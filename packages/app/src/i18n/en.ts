@@ -802,6 +802,7 @@ export const dict = {
   "semif.backend.fallback.platform_unsupported": "Using CPU — HIP/ROCm not supported on this platform",
   "semif.backend.fallback.mixed_gpus": "Using CPU — mixed AMD and NVIDIA GPUs; set backend explicitly",
   "semif.backend.fallback.no_amd_gpu": "Using CPU — no AMD GPU detected",
+  "semif.backend.fallback.gpu_unsupported": "This AMD GPU isn’t supported by the current HIP build.",
   "semif.backend.fallback.missing_rocm_runtime": "Using CPU — ROCm/HIP system runtime missing",
   "semif.backend.fallback.no_vendored_binary": "Using CPU — HIP binary not included in this build",
   "semif.backend.fallback.hip_download_failed": "Using CPU — HIP runtime download failed",
