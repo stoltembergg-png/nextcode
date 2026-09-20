@@ -10,12 +10,17 @@
 // process output never become part of the report.
 
 import net from "node:net"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
+import { NodeFileSystem } from "@effect/platform-node"
+import { Effect } from "effect"
 import { HOST_TARGETS, lockTargetKey, type SemifVariant } from "./fetch-semif-server"
 import lockfile from "./semif-server.lock.json" with { type: "json" }
 import { parseSemifOptions } from "../src/semif/config"
 import { SemifManifest } from "../src/semif/manifest"
 import { SemifScoring, type SemifDecision } from "../src/semif/scoring"
+import { SemifRuntime } from "../src/semif/runtime"
 import { generateStrategies, type OmoStrategy } from "../src/omo/strategy"
 
 const SCHEMA_VERSION = 1 as const
@@ -38,6 +43,10 @@ export const REAL_MODEL_TASKS = [
   { id: "fixer", question: "Fix the reported regression and add a focused verification test." },
   { id: "observer", question: "Inspect the supplied visual evidence and report the relevant discrepancy." },
 ] as const
+
+export function realModelOptions(): readonly { readonly id: string; readonly description: string }[] {
+  return REAL_MODEL_STRATEGIES.map((strategy) => ({ id: strategy.id, description: strategy.id }))
+}
 
 type LifecycleStage = "offline" | "starting" | "ready" | "deciding" | "disposing" | "disposed"
 type ProbeStatus = "passed" | "skipped" | "failed"
@@ -72,6 +81,8 @@ class ProbeFailure extends Error {
 }
 
 type UnknownRecord = Record<string, unknown>
+type StagedFile = { readonly path: string; readonly bytes: number; readonly sha256: string }
+type VerifiedArtifacts = { readonly libsPath?: string }
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -269,7 +280,7 @@ function defaultMarkerPath(target: string, variant: string): string {
   )
 }
 
-async function verifyPinnedArtifacts(modelPath: string, serverPath: string): Promise<void> {
+async function verifyPinnedArtifacts(modelPath: string, serverPath: string): Promise<VerifiedArtifacts> {
   const model = await inspectFile(modelPath)
   if (model.bytes !== MODEL.bytes || model.sha256 !== MODEL.sha256) throw new ProbeFailure("model_unverified")
 
@@ -282,8 +293,6 @@ async function verifyPinnedArtifacts(modelPath: string, serverPath: string): Pro
   const expected = lockfile.targets[lockTarget as keyof typeof lockfile.targets]
   if (!expected) throw new ProbeFailure("runtime_unpinned")
 
-  const server = Bun.file(serverPath)
-  if (!(await server.exists()) || (await server.size) === 0) throw new ProbeFailure("server_missing")
   const markerPath = process.env.SEMIF_SERVER_MARKER?.trim() || defaultMarkerPath(target, variant)
   const markerFile = Bun.file(markerPath)
   if (!(await markerFile.exists())) throw new ProbeFailure("runtime_marker_missing")
@@ -297,15 +306,50 @@ async function verifyPinnedArtifacts(modelPath: string, serverPath: string): Pro
   ) {
     throw new ProbeFailure("runtime_marker_unverified")
   }
-  const staged = Array.isArray(markerRecord.staged) ? markerRecord.staged : []
+  const rawStaged = requireArray(markerRecord.staged, "runtime_staged_missing")
+  const staged = rawStaged.map((entry) => {
+    const record = requireRecord(entry, "runtime_staged_invalid")
+    const stagedPath = requireString(record.path, "runtime_staged_path_missing")
+    const bytes = record.bytes
+    const sha256 = record.sha256
+    if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes < 0) {
+      throw new ProbeFailure("runtime_staged_size_invalid")
+    }
+    if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(sha256)) {
+      throw new ProbeFailure("runtime_staged_hash_invalid")
+    }
+    return { path: stagedPath, bytes, sha256: sha256.toLowerCase() } satisfies StagedFile
+  })
+  if (staged.length === 0) throw new ProbeFailure("runtime_staged_missing")
+
   const serverName = path.basename(serverPath)
-  if (
-    !staged.some(
-      (entry) => isRecord(entry) && typeof entry.path === "string" && path.basename(entry.path) === serverName,
-    )
-  ) {
+  const serverEntry = staged.find((entry) => path.basename(entry.path) === serverName)
+  if (!serverEntry) throw new ProbeFailure("runtime_binary_unverified")
+  const actualServer = await inspectFile(serverPath)
+  if (actualServer.bytes !== serverEntry.bytes || actualServer.sha256 !== serverEntry.sha256) {
     throw new ProbeFailure("runtime_binary_unverified")
   }
+
+  for (const entry of staged) {
+    const actual = await inspectFile(entry.path)
+    if (actual.bytes !== entry.bytes || actual.sha256 !== entry.sha256) {
+      throw new ProbeFailure("runtime_staged_unverified")
+    }
+  }
+
+  const archive = await inspectFile(path.join(path.dirname(markerPath), expected.asset))
+  if (archive.bytes !== expected.bytes || archive.sha256 !== expected.sha256) {
+    throw new ProbeFailure("runtime_archive_unverified")
+  }
+
+  const libraryPaths = staged
+    .filter((entry) => path.basename(entry.path) !== serverName)
+    .map((entry) => path.dirname(entry.path))
+  if (libraryPaths.length === 0) throw new ProbeFailure("runtime_libs_missing")
+  if (libraryPaths.some((directory) => directory !== libraryPaths[0])) {
+    throw new ProbeFailure("runtime_lib_layout_invalid")
+  }
+  return { libsPath: libraryPaths[0] }
 }
 
 async function waitForReady(baseUrl: string, child: Bun.Subprocess, deadline: number): Promise<void> {
@@ -349,9 +393,17 @@ async function runProbe(): Promise<RealModelReport> {
   let status: ProbeStatus = "failed"
   let errorCode: string | undefined
   let child: Bun.Subprocess | undefined
+  let runtimeRoot: string | undefined
 
   try {
-    await verifyPinnedArtifacts(modelPath, serverPath)
+    const verified = await verifyPinnedArtifacts(modelPath, serverPath)
+    runtimeRoot = await mkdtemp(path.join(os.tmpdir(), "omo-semif-runtime-"))
+    const runtime = await Effect.runPromise(
+      Effect.provide(
+        SemifRuntime.materialize({ serverPath, libsPath: verified.libsPath, root: runtimeRoot }),
+        NodeFileSystem.layer,
+      ),
+    )
     const port = await freePort()
     const baseUrl = `http://127.0.0.1:${port}`
     const timeoutMs = envInteger("OMO_REAL_MODEL_TIMEOUT_MS", 300_000, 30_000, 900_000)
@@ -367,9 +419,12 @@ async function runProbe(): Promise<RealModelReport> {
     })
 
     lifecycle.push("starting")
+    const runtimePath = runtime.dir
+    const withRuntimePath = (name: string): string =>
+      [runtimePath, process.env[name]].filter((value): value is string => Boolean(value)).join(path.delimiter)
     child = Bun.spawn({
       cmd: [
-        serverPath,
+        runtime.serverPath,
         "-m",
         modelPath,
         "--host",
@@ -384,8 +439,16 @@ async function runProbe(): Promise<RealModelReport> {
         "--parallel",
         "2",
       ],
-      cwd: path.dirname(serverPath),
-      env: { ...process.env, SEMIF_MODE: "off" },
+      cwd: runtimePath,
+      env: {
+        ...process.env,
+        PATH: withRuntimePath("PATH"),
+        LD_LIBRARY_PATH: withRuntimePath("LD_LIBRARY_PATH"),
+        DYLD_LIBRARY_PATH: withRuntimePath("DYLD_LIBRARY_PATH"),
+        DYLD_FALLBACK_LIBRARY_PATH: withRuntimePath("DYLD_FALLBACK_LIBRARY_PATH"),
+        GGML_BACKEND_PATH: runtimePath,
+        SEMIF_MODE: "off",
+      },
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
@@ -405,7 +468,7 @@ async function runProbe(): Promise<RealModelReport> {
           id: `omo-real-model-${task.id}`,
           state: { task: task.id, evidence: "representative native OMO routing task" },
           question: task.question,
-          options: REAL_MODEL_STRATEGIES.map((strategy) => ({ id: strategy.id, description: strategy.id })),
+          options: [...realModelOptions()],
         },
         SemifManifest.profile(MODEL),
       )
@@ -428,6 +491,13 @@ async function runProbe(): Promise<RealModelReport> {
       lifecycle.push("disposing")
       if (await dispose(child)) lifecycle.push("disposed")
       else errorCode ??= "disposal_failed"
+    }
+    if (runtimeRoot !== undefined) {
+      try {
+        await rm(runtimeRoot, { recursive: true, force: true })
+      } catch {
+        errorCode ??= "runtime_cleanup_failed"
+      }
     }
   }
 

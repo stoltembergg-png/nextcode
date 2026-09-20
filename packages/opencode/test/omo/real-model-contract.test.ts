@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { SemifDecision } from "../../src/semif/scoring"
-import { assertRealModelDecision, REAL_MODEL_STRATEGIES, sanitizeProbeReport } from "../../script/omo-real-model"
+import {
+  assertRealModelDecision,
+  REAL_MODEL_STRATEGIES,
+  realModelOptions,
+  sanitizeProbeReport,
+} from "../../script/omo-real-model"
 
 function validDecision(): SemifDecision {
   const options = REAL_MODEL_STRATEGIES.slice(0, 3)
@@ -25,10 +30,13 @@ function validDecision(): SemifDecision {
 
 describe("real-model SemIf contract", () => {
   test("offers no more than sixteen slots and every slot is an eligible strategy", () => {
-    expect(REAL_MODEL_STRATEGIES.length).toBeGreaterThan(1)
-    expect(REAL_MODEL_STRATEGIES.length).toBeLessThanOrEqual(16)
     const eligible = new Set(REAL_MODEL_STRATEGIES.map((strategy) => strategy.id))
-    expect(REAL_MODEL_STRATEGIES.every((strategy) => eligible.has(strategy.id))).toBe(true)
+    const options = realModelOptions()
+    expect(options.length).toBeGreaterThan(1)
+    expect(options.length).toBeLessThanOrEqual(16)
+    expect(options.map((option) => option.id)).toEqual(REAL_MODEL_STRATEGIES.map((strategy) => strategy.id))
+    expect(options.every((option) => eligible.has(option.id))).toBe(true)
+    expect(options.every((option) => option.description === option.id)).toBe(true)
   })
 
   test("accepts finite orderable scores without asserting a probability threshold", () => {
