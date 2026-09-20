@@ -58,6 +58,8 @@ function directoryState() {
       return this.session_status[id]?.type !== "idle"
     },
     session_diff: {},
+    omo_routing_activity: {},
+    omo_routing_watermark: {},
     todo: {},
     permission: {},
     question: {},

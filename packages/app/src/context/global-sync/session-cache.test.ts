@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part, PermissionRequest, QuestionRequest, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import { dropSessionCaches, pickSessionCacheEvictions } from "./session-cache"
 
 const msg = (id: string, sessionID: string) =>
@@ -34,6 +35,8 @@ describe("app session cache", () => {
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
       part_text_accum_delta: Record<string, string | undefined>
+      omo_routing_activity: Record<string, Record<string, OmoRoutingEvent.OmoRoutingActivity | undefined> | undefined>
+      omo_routing_watermark: Record<string, Record<string, number | undefined> | undefined>
     } = {
       session_status: { ses_1: { type: "busy" } as SessionStatus },
       session_diff: { ses_1: [] },
@@ -44,6 +47,8 @@ describe("app session cache", () => {
       permission: { ses_1: [] as PermissionRequest[] },
       question: { ses_1: [] as QuestionRequest[] },
       part_text_accum_delta: { prt_1: "streamed text" },
+      omo_routing_activity: { ses_1: {} },
+      omo_routing_watermark: { ses_1: {} },
     }
 
     dropSessionCaches(store, ["ses_1"])
@@ -56,6 +61,8 @@ describe("app session cache", () => {
     expect(store.session_status.ses_1).toBeUndefined()
     expect(store.permission.ses_1).toBeUndefined()
     expect(store.question.ses_1).toBeUndefined()
+    expect(store.omo_routing_activity.ses_1).toBeUndefined()
+    expect(store.omo_routing_watermark.ses_1).toBeUndefined()
   })
 
   test("dropSessionCaches clears message-backed parts", () => {
@@ -70,6 +77,8 @@ describe("app session cache", () => {
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
       part_text_accum_delta: Record<string, string | undefined>
+      omo_routing_activity: Record<string, Record<string, OmoRoutingEvent.OmoRoutingActivity | undefined> | undefined>
+      omo_routing_watermark: Record<string, Record<string, number | undefined> | undefined>
     } = {
       session_status: {},
       session_diff: {},
@@ -80,12 +89,16 @@ describe("app session cache", () => {
       permission: {},
       question: {},
       part_text_accum_delta: {},
+      omo_routing_activity: { ses_1: {} },
+      omo_routing_watermark: { ses_1: {} },
     }
 
     dropSessionCaches(store, ["ses_1"])
 
     expect(store.message.ses_1).toBeUndefined()
     expect(store.part[m.id]).toBeUndefined()
+    expect(store.omo_routing_activity.ses_1).toBeUndefined()
+    expect(store.omo_routing_watermark.ses_1).toBeUndefined()
   })
 
   test("pickSessionCacheEvictions preserves requested sessions", () => {

@@ -1,12 +1,15 @@
 import type { Message, Part, PermissionRequest, QuestionRequest, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 
 export const SESSION_CACHE_LIMIT = 40
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
   session_diff: Record<string, FileDiffInfo[] | undefined>
+  omo_routing_activity: Record<string, Record<string, OmoRoutingEvent.OmoRoutingActivity | undefined> | undefined>
+  omo_routing_watermark: Record<string, Record<string, number | undefined> | undefined>
   todo: Record<string, Todo[] | undefined>
   message: Record<string, Message[] | undefined>
   session_message: Record<string, SessionMessageInfo[] | undefined>
@@ -34,6 +37,8 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.todo[sessionID]
     delete store.session_message[sessionID]
     delete store.session_diff[sessionID]
+    delete store.omo_routing_activity[sessionID]
+    delete store.omo_routing_watermark[sessionID]
     delete store.session_status[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]

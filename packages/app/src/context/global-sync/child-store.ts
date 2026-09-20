@@ -234,6 +234,8 @@ export function createChildStoreManager(input: {
               return (type ?? "idle") !== "idle"
             },
             session_diff: {},
+            omo_routing_activity: {},
+            omo_routing_watermark: {},
             todo: {},
             permission: {},
             question: {},
