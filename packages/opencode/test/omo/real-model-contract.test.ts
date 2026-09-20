@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { SemifDecision } from "../../src/semif/scoring"
 import {
   assertRealModelDecision,
+  dispose,
   REAL_MODEL_STRATEGIES,
   realModelOptions,
   sanitizeProbeReport,
@@ -29,6 +30,15 @@ function validDecision(): SemifDecision {
 }
 
 describe("real-model SemIf contract", () => {
+  test("reports subprocess termination through Bun's exited promise", async () => {
+    const command =
+      process.platform === "win32"
+        ? ["cmd.exe", "/c", "ping", "-n", "30", "127.0.0.1"]
+        : ["sh", "-c", "sleep 30"]
+    const child = Bun.spawn({ cmd: command, stdin: "ignore", stdout: "ignore", stderr: "ignore" })
+    expect(await dispose(child)).toBe(true)
+  })
+
   test("offers no more than sixteen slots and every slot is an eligible strategy", () => {
     const eligible = new Set(REAL_MODEL_STRATEGIES.map((strategy) => strategy.id))
     const options = realModelOptions()

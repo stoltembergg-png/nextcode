@@ -366,15 +366,13 @@ async function waitForReady(baseUrl: string, child: Bun.Subprocess, deadline: nu
   throw new ProbeFailure("sidecar_ready_timeout")
 }
 
-async function dispose(child: Bun.Subprocess): Promise<boolean> {
+export async function dispose(child: Bun.Subprocess): Promise<boolean> {
+  const waitForExit = () => Promise.race([child.exited.then(() => true), Bun.sleep(5000).then(() => false)])
   try {
     child.kill()
-    await Promise.race([child.exited, Bun.sleep(5000)])
-    if (child.exitCode === null) {
-      child.kill()
-      await Promise.race([child.exited, Bun.sleep(5000)])
-    }
-    return child.exitCode !== null
+    if (await waitForExit()) return true
+    child.kill()
+    return await waitForExit()
   } catch {
     return false
   }
