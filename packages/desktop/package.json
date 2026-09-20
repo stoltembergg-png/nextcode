@@ -16,6 +16,7 @@
     "dev": "electron-vite dev",
     "prebuild": "bun ./scripts/prebuild.ts",
     "build": "electron-vite build",
+    "smoke:omo": "bun ./scripts/omo-smoke.ts",
     "package": "electron-builder --config electron-builder.config.ts",
     "package:mac": "electron-builder --mac --config electron-builder.config.ts",
     "package:win": "electron-builder --win --config electron-builder.config.ts",

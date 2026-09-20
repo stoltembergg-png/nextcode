@@ -16,6 +16,9 @@ on:
       - "packages/session-ui/**"
       - "packages/client/**"
       - "packages/identity/**"
+      - "packages/core/**"
+      - "packages/schema/**"
+      - "packages/opencode/src/omo/**"
       - ".github/workflows/tauri-shell-macos.yml"
 
 concurrency:
@@ -77,6 +80,14 @@ jobs:
           ./target/debug/opencode-desktop > run.log 2>&1 &
           PID=$!
           sleep 35
+          smoke=0
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          case "$(uname -m)" in
+            arm64) PLATFORM=opencode-darwin-arm64 ;;
+            x86_64) PLATFORM=opencode-darwin-x64 ;;
+            *) echo "unsupported arch $(uname -m)"; smoke=1; PLATFORM=opencode-darwin-x64 ;;
+          esac
+          (cd .. && bun run smoke:omo -- ../opencode/dist/${PLATFORM}/bin/opencode src-tauri/run.log) || smoke=1
           kill "$PID" 2>/dev/null || true
           sleep 3
           echo "=== shell log (filtered) ==="
@@ -90,7 +101,7 @@ jobs:
           grep -q "sidecar killed" run.log || { echo "WARN: sidecar kill on exit not observed"; }
           echo "=== app data ==="
           ls -la "$HOME/Library/Application Support/ai.opencode.desktop.v2.dev" 2>/dev/null || true
-          exit $fail
+          exit $((fail + smoke))
 
       - name: Upload shell log
         if: always()

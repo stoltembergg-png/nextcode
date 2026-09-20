@@ -20,7 +20,10 @@ on:
       - "packages/session-ui/**"
       - "packages/client/**"
       - "packages/identity/**"
+      - "packages/core/**"
+      - "packages/schema/**"
       - "packages/opencode/**"
+      - "docs/omo/**"
       - ".github/workflows/tauri-shell-windows.yml"
 
 concurrency:
@@ -129,6 +132,8 @@ jobs:
           ./target/debug/opencode-desktop.exe > run.log 2>&1 &
           PID=$!
           sleep 40
+          smoke=0
+          (cd .. && bun run smoke:omo -- ../opencode/dist/opencode-windows-x64/bin/opencode.exe src-tauri/run.log) || smoke=1
           kill "$PID" 2>/dev/null || true
           sleep 3
           echo "=== shell log (filtered) ==="
@@ -143,7 +148,7 @@ jobs:
           grep -q "sidecar killed" run.log || { echo "WARN: sidecar kill on exit not observed"; }
           echo "=== app data ==="
           ls -la "$LOCALAPPDATA/ai.opencode.desktop.v2.dev" 2>/dev/null || true
-          exit $fail
+          exit $((fail + smoke))
 
       - name: Upload shell log
         if: always()
