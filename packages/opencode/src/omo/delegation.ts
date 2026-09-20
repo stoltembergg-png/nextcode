@@ -1,4 +1,12 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { PermissionV2 } from "@opencode-ai/core/permission"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { Prompt as PromptV2 } from "@opencode-ai/core/session/prompt"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { BackgroundJob } from "@/background/job"
 import { Config } from "@/config/config"
@@ -9,10 +17,12 @@ import { MessageID, SessionID } from "@/session/schema"
 import { MessageV2 } from "@/session/message-v2"
 import type { SessionPrompt } from "@/session/prompt"
 import type { Context as ToolContext } from "@/tool/tool"
-import { Effect, Exit, Context, Layer, Scope } from "effect"
+import { Effect, Exit, Context, Layer, LayerMap, Scope, Option } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { Location } from "@opencode-ai/core/location"
+import type { LocationError, LocationServices } from "@opencode-ai/core/location-services"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -37,10 +47,18 @@ export type LegacyDelegateRequest = {
   readonly promptOps?: TaskPromptOps
 }
 
-/** Reserved for the V2 adapter. Task 8 adds its concrete request contract. */
 export type V2DelegateRequest = {
   readonly kind: "v2"
-  readonly [key: string]: unknown
+  readonly description: string
+  readonly prompt: string
+  readonly sessionID: SessionID
+  readonly agent?: string
+  readonly task_id?: string
+  readonly background?: boolean
+  readonly model?: ModelV2.Ref
+  readonly variant?: string
+  readonly abort: AbortSignal
+  readonly metadata?: ToolContext["metadata"]
 }
 
 export type DelegateRequest = LegacyDelegateRequest | V2DelegateRequest
@@ -72,6 +90,8 @@ const BACKGROUND_UPDATED = [
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
 ].join("\n")
+const OMO_DELEGATE = "omo_delegate"
+const MAX_BACKGROUND_RESULT = 12_000
 
 const layer = Layer.effect(
   Service,
@@ -85,8 +105,225 @@ const layer = Layer.effect(
     const database = yield* Database.Service
 
     const delegate = Effect.fn("DelegationService.delegate")(function* (request: DelegateRequest) {
-      if (request.kind === "legacy") return yield* legacy(request)
-      return yield* Effect.fail(new Error("V2 delegation is not available yet"))
+      const result = request.kind === "legacy" ? legacy(request) : v2(request)
+      return yield* result.pipe(Effect.mapError(toError))
+    })
+
+    function v2(request: V2DelegateRequest) {
+      return Effect.gen(function* () {
+        if (request.abort.aborted) return yield* Effect.fail(new Error("Delegation cancelled"))
+
+        const sessionsOption = yield* Effect.serviceOption(SessionV2.Service)
+        const locationsOption = yield* Effect.serviceOption(LocationServiceMap.Service)
+        if (Option.isNone(sessionsOption)) return yield* Effect.fail(new Error("V2 Session service is unavailable"))
+        if (Option.isNone(locationsOption)) return yield* Effect.fail(new Error("V2 location services are unavailable"))
+        const sessionsV2 = sessionsOption.value
+        const locations = locationsOption.value
+
+        const cfg = yield* config.get()
+        const omo = ConfigOmo.resolve(cfg.omo).info
+        const parent = yield* sessionsV2.get(request.sessionID)
+        const depth = yield* sessionDepth(sessionsV2, parent)
+        const maxDepth = cfg.subagent_depth ?? 1
+        if (depth >= maxDepth) {
+          return yield* Effect.fail(
+            new Error(`Subagent depth limit reached (${maxDepth}). Increase "subagent_depth" to allow nested subagents.`),
+          )
+        }
+
+        const requestedAgent = request.agent ? AgentV2.ID.make(request.agent) : undefined
+        const taskID = request.task_id ? SessionV2.ID.make(request.task_id) : undefined
+        const existing = taskID
+          ? yield* sessionsV2.get(taskID).pipe(
+              Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)),
+            )
+          : undefined
+        if (existing && existing.parentID !== parent.id) {
+          return yield* Effect.fail(new Error(`Task ${existing.id} belongs to a different parent session`))
+        }
+
+        const agentID = requestedAgent ?? existing?.agent ?? parent.agent ?? AgentV2.ID.make("build")
+        const model = modelOverride(request.model ?? existing?.model ?? parent.model, request.variant)
+        yield* assertV2Delegation(locations, parent, agentID)
+        const child = existing ?? (yield* sessionsV2.createChild({ parentID: parent.id, agent: agentID, model }))
+        if (existing) {
+          if (requestedAgent && existing.agent !== requestedAgent) yield* sessionsV2.switchAgent({ sessionID: child.id, agent: agentID })
+          if (model && !sameModel(existing.model, model)) yield* sessionsV2.switchModel({ sessionID: child.id, model })
+        }
+        const currentChild = existing ? yield* sessionsV2.get(child.id) : child
+
+        const metadata = {
+          parentSessionId: parent.id,
+          sessionId: child.id,
+          agent: currentChild.agent ?? agentID,
+          ...(currentChild.model ? { model: currentChild.model } : {}),
+        }
+        if (request.metadata) yield* request.metadata({ title: request.description, metadata })
+
+        yield* sessionsV2.prompt({
+          sessionID: child.id,
+          prompt: PromptV2.make({ text: request.prompt }),
+          resume: false,
+        })
+
+        const runChild = Effect.fn("DelegationService.runV2Child")(function* () {
+          yield* sessionsV2.resume(child.id)
+          return yield* readV2Result(sessionsV2, child.id)
+        })
+        const runInBackground = request.background === true && omo.background !== "deny"
+        if (!runInBackground) {
+          const text = yield* runForeground(runChild(), request.abort, sessionsV2.interrupt(child.id))
+          return {
+            sessionID: child.id,
+            state: "completed" as const,
+            text: renderV2Output(child.id, "completed", text),
+            background: false,
+            ...(request.background === true ? { downgraded: "background disabled by OMO policy" } : {}),
+          }
+        }
+
+        const job = yield* startV2Background({
+          parent,
+          child,
+          sessionsV2,
+          description: request.description,
+          run: runChild().pipe(
+            Effect.raceFirst(abortSignal(request.abort)),
+            Effect.onExit((exit) => (Exit.isFailure(exit) ? sessionsV2.interrupt(child.id) : Effect.void)),
+            Effect.provideService(SessionV2.Service, sessionsV2),
+          ),
+          metadata,
+          notify: request.metadata,
+        }).pipe(
+          Effect.catch((error) => {
+            if (omo.background === "deny" || request.abort.aborted) return Effect.fail(error)
+            return Effect.succeed(undefined)
+          }),
+        )
+        if (job) {
+          return {
+            sessionID: child.id,
+            state: "running" as const,
+            text: renderV2Output(child.id, "running", BACKGROUND_STARTED),
+            background: true,
+            jobID: job.id,
+          }
+        }
+
+        const text = yield* runForeground(runChild(), request.abort, sessionsV2.interrupt(child.id))
+        return {
+          sessionID: child.id,
+          state: "completed" as const,
+          text: renderV2Output(child.id, "completed", text),
+          background: false,
+          downgraded: "native background service unavailable",
+        }
+      })
+    }
+
+    const sessionDepth = Effect.fn("DelegationService.sessionDepth")(function* (
+      sessionsV2: SessionV2.Interface,
+      session: SessionV2.Info,
+    ) {
+      let current = session
+      let depth = 0
+      while (current.parentID) {
+        depth++
+        current = yield* sessionsV2.get(current.parentID)
+      }
+      return depth
+    })
+
+    const assertV2Delegation = Effect.fn("DelegationService.assertV2Delegation")(function* (
+      locations: LayerMap.LayerMap<Location.Ref, LocationServices, LocationError>,
+      parent: SessionV2.Info,
+      agentID: AgentV2.ID,
+    ) {
+      yield* Effect.gen(function* () {
+        const agents = yield* AgentV2.Service
+        const permissions = yield* PermissionV2.Service
+        const agent = yield* agents.get(agentID)
+        if (!agent) return yield* Effect.fail(new Error(`Unknown agent type: ${agentID} is not a valid agent type`))
+        yield* permissions.assert({
+          sessionID: parent.id,
+          agent: parent.agent,
+          action: OMO_DELEGATE,
+          resources: [agentID],
+        })
+      }).pipe(Effect.provide(locations.get(parent.location)))
+    })
+
+    const startV2Background = Effect.fn("DelegationService.startV2Background")(function* (input: {
+      parent: SessionV2.Info
+      child: SessionV2.Info
+      sessionsV2: SessionV2.Interface
+      description: string
+      run: Effect.Effect<string, unknown>
+      metadata: Record<string, unknown>
+      notify?: ToolContext["metadata"]
+    }) {
+      const extend = yield* background.extend({ id: input.child.id, run: input.run })
+      if (extend) {
+        const current = yield* background.get(input.child.id)
+        if (current) return current
+        return yield* Effect.fail(new Error(`Background task ${input.child.id} disappeared while extending`))
+      }
+
+      const started = yield* background.start({
+        id: input.child.id,
+        type: "omo_delegate",
+        title: input.description,
+        metadata: { ...input.metadata, background: true },
+        run: input.run,
+      })
+      if (input.notify) {
+        yield* input.notify({
+          title: input.description,
+          metadata: { ...input.metadata, background: true, jobId: started.id },
+        })
+      }
+      yield* notifyV2Background(input.sessionsV2, input.parent.id, input.child.id, input.description, started.id)
+      return started
+    })
+
+    const notifyV2Background = Effect.fn("DelegationService.notifyV2Background")(function* (
+      sessionsV2: SessionV2.Interface,
+      parentID: SessionID,
+      childID: SessionID,
+      description: string,
+      jobID: string,
+    ) {
+      yield* background.wait({ id: jobID }).pipe(
+        Effect.flatMap((result) => {
+          const info = result.info
+          if (!info) return Effect.void
+          if (info.status === "completed") return injectV2Result(sessionsV2, parentID, childID, description, "completed", info.output ?? "")
+          if (info.status === "error") return injectV2Result(sessionsV2, parentID, childID, description, "error", info.error ?? "")
+          if (info.status === "cancelled") return injectV2Result(sessionsV2, parentID, childID, description, "error", "Task cancelled")
+          return Effect.void
+        }),
+        Effect.forkIn(scope, { startImmediately: true }),
+      )
+    })
+
+    const injectV2Result = Effect.fn("DelegationService.injectV2Result")(function* (
+      sessionsV2: SessionV2.Interface,
+      parentID: SessionID,
+      childID: SessionID,
+      description: string,
+      state: "completed" | "error",
+      text: string,
+    ) {
+      yield* sessionsV2.prompt({
+        sessionID: parentID,
+        prompt: PromptV2.make({
+          text: renderV2Output(
+            childID,
+            state,
+            state === "completed" ? `Background task completed: ${description}\n${text}` : `Background task failed: ${description}\n${text}`,
+          ),
+        }),
+      }).pipe(Effect.ignore)
     })
 
     function legacy(request: LegacyDelegateRequest) {
@@ -362,7 +599,14 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer,
-  deps: [Agent.node, BackgroundJob.node, Config.node, Database.node, RuntimeFlags.node, Session.node],
+  deps: [
+    Agent.node,
+    BackgroundJob.node,
+    Config.node,
+    Database.node,
+    RuntimeFlags.node,
+    Session.node,
+  ],
 })
 
 function renderOutput(input: {
@@ -380,6 +624,70 @@ function renderOutput(input: {
     `</${tag}>`,
     "</task>",
   ].join("\n")
+}
+
+function modelOverride(model: ModelV2.Ref | undefined, variant: string | undefined) {
+  if (!model || variant === undefined) return model
+  return { ...model, variant: ModelV2.VariantID.make(variant) }
+}
+
+function sameModel(left: ModelV2.Ref | undefined, right: ModelV2.Ref | undefined) {
+  return (
+    left?.providerID === right?.providerID &&
+    left?.id === right?.id &&
+    (left?.variant ?? "default") === (right?.variant ?? "default")
+  )
+}
+
+function abortSignal(signal: AbortSignal) {
+  return Effect.callback<never>((resume) => {
+    const onAbort = () => resume(Effect.interrupt)
+    if (signal.aborted) onAbort()
+    else signal.addEventListener("abort", onAbort, { once: true })
+    return Effect.sync(() => signal.removeEventListener("abort", onAbort))
+  })
+}
+
+function runForeground<E, R>(
+  run: Effect.Effect<string, E, R>,
+  abort: AbortSignal,
+  interrupt: Effect.Effect<void, never, R>,
+): Effect.Effect<string, E | Error, R> {
+  return run.pipe(
+    Effect.raceFirst(abortSignal(abort)),
+    Effect.catchCause((cause): Effect.Effect<never, E | Error> =>
+      abort.aborted ? Effect.fail(new Error("Delegation cancelled")) : Effect.failCause(cause),
+    ),
+    Effect.ensuring(
+      Effect.sync(() => abort.aborted).pipe(Effect.flatMap((cancelled) => (cancelled ? interrupt : Effect.void))),
+    ),
+  )
+}
+
+function renderV2Output(sessionID: SessionID, state: "running" | "completed" | "error", text: string) {
+  const bounded = text.length > MAX_BACKGROUND_RESULT ? `${text.slice(0, MAX_BACKGROUND_RESULT)}\n[output truncated]` : text
+  const tag = state === "error" ? "task_error" : "task_result"
+  return [`<task id="${sessionID}" state="${state}">`, `<${tag}>`, bounded, `</${tag}>`, "</task>"].join("\n")
+}
+
+function readV2Result(service: SessionV2.Interface, sessionID: SessionID) {
+  return Effect.gen(function* () {
+    const messages = yield* service.messages({ sessionID, order: "desc", limit: 64 })
+    const assistant = messages.find((message): message is SessionMessage.Assistant => message.type === "assistant")
+    if (!assistant) return ""
+    if (assistant.error) return yield* Effect.fail(new Error(assistant.error.message))
+    const toolError = assistant.content.find(
+      (part): part is SessionMessage.AssistantTool => part.type === "tool" && part.state.status === "error",
+    )
+    if (toolError?.state.status === "error") return yield* Effect.fail(new Error(toolError.state.error.message))
+    return assistant.content
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n")
+  })
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 export * as DelegationService from "./delegation"

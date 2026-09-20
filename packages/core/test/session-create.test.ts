@@ -48,6 +48,57 @@ const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
+  it.effect("creates a child with the parent's location and immutable identity", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const parent = yield* session.create({
+        location: Location.Ref.make({
+          directory: AbsolutePath.make("/parent"),
+          workspaceID: WorkspaceV2.ID.make("wrk_parent"),
+        }),
+        agent: AgentV2.ID.make("orchestrator"),
+      })
+      const model = ModelV2.Ref.make({
+        id: ModelV2.ID.make("child-model"),
+        providerID: ProviderV2.ID.anthropic,
+        variant: ModelV2.VariantID.make("fast"),
+      })
+
+      const child = yield* session.createChild({
+        parentID: parent.id,
+        agent: AgentV2.ID.make("fixer"),
+        model,
+      })
+
+      expect(child).toMatchObject({
+        parentID: parent.id,
+        location: parent.location,
+        agent: "fixer",
+        model,
+      })
+
+      const admitted = yield* session.prompt({
+        sessionID: child.id,
+        prompt: Prompt.make({ text: "child prompt" }),
+        resume: false,
+      })
+      expect(admitted.sessionID).toBe(child.id)
+      expect(yield* session.get(child.id)).toEqual(child)
+    }),
+  )
+
+  it.effect("rejects a child request when the parent does not exist", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+
+      expect(
+        yield* session
+          .createChild({ parentID: SessionV2.ID.make("ses_missing_child_parent") })
+          .pipe(Effect.flip, Effect.map((error) => error._tag)),
+      ).toBe("Session.NotFoundError")
+    }),
+  )
+
   it.effect("creates a fresh projected session when the ID is omitted", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
