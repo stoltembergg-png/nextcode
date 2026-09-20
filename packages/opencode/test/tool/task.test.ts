@@ -24,6 +24,7 @@ import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { DelegationService } from "@/omo/delegation"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -39,6 +40,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
     LayerNode.group([
       Agent.node,
       BackgroundJob.node,
+      DelegationService.node,
       EventV2Bridge.node,
       Config.node,
       CrossSpawnSpawner.node,

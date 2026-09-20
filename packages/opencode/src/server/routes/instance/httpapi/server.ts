@@ -40,6 +40,7 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { SemifService } from "@/semif/service"
+import { DelegationService } from "@/omo/delegation"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
@@ -238,6 +239,7 @@ const app = LayerNode.group([
   SessionProjector.node,
   SessionStatus.node,
   BackgroundJob.node,
+  DelegationService.node,
   RuntimeFlags.node,
   EventV2Bridge.node,
   SessionRunState.node,
