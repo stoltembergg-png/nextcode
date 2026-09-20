@@ -22,6 +22,8 @@ on:
       - "packages/opencode/src/server/routes/instance/httpapi/groups/omo.ts"
       - "packages/opencode/src/server/routes/instance/httpapi/handlers/omo.ts"
       - "packages/opencode/src/omo/**"
+      - "packages/opencode/src/semif/**"
+      - "packages/opencode/src/background/**"
       - "packages/opencode/src/session/**"
       - "packages/opencode/src/agent/**"
       - "packages/desktop/scripts/omo-smoke.ts"

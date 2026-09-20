@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -41,6 +41,23 @@ console.log(
 
 async function runSidecar(path: string, deadline: number) {
   const smokeDirectory = await mkdtemp(join(tmpdir(), "nextcode-omo-smoke-"))
+  const smokeConfig = JSON.stringify({
+    omo: {
+      enabled: true,
+      preset: "auto",
+      background: "allow",
+      routing: "deterministic",
+      verification: "tests",
+      disabled_agents: [],
+    },
+    semif: { mode: "off", download: "never" },
+  })
+  await Promise.all([
+    writeFile(join(smokeDirectory, "opencode.json"), smokeConfig),
+    mkdir(join(smokeDirectory, "opencode"), { recursive: true }).then(() =>
+      writeFile(join(smokeDirectory, "opencode", "opencode.json"), smokeConfig),
+    ),
+  ])
   const env = {
     ...process.env,
     OPENCODE_DISABLE_MODELS_FETCH: "true",
@@ -54,46 +71,55 @@ async function runSidecar(path: string, deadline: number) {
     OPENCODE_PURE: "1",
     SEMIF_MODE: "off",
   }
-  const output = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(path, ["--pure", "debug", "omo-smoke", "--json"], {
-      cwd: process.cwd(),
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
+  try {
+    const output = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
+      const child = spawn(path, ["--pure", "debug", "omo-smoke", "--json"], {
+        cwd: process.cwd(),
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      })
+      let stdout = ""
+      let stderr = ""
+      let settled = false
+      const timeout = setTimeout(() => {
+        if (settled) return
+        settled = true
+        child.kill("SIGTERM")
+        setTimeout(() => child.kill("SIGKILL"), 1_000).unref()
+        reject(new Error(`OMO sidecar smoke timed out after ${deadline}ms`))
+      }, deadline)
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8")
+      })
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8")
+      })
+      child.once("error", (error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        reject(error)
+      })
+      child.once("close", (code) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        resolve({ stdout, stderr, code })
+      })
     })
-    let stdout = ""
-    let stderr = ""
-    let settled = false
-    const timeout = setTimeout(() => {
-      if (settled) return
-      settled = true
-      child.kill("SIGTERM")
-      setTimeout(() => child.kill("SIGKILL"), 1_000).unref()
-      reject(new Error(`OMO sidecar smoke timed out after ${deadline}ms`))
-    }, deadline)
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8")
-    })
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8")
-    })
-    child.once("error", (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      reject(error)
-    })
-    child.once("close", (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve({ stdout, stderr, code })
-    })
-  })
-  if (output.code !== 0) throw new Error(`OMO sidecar smoke failed with code ${String(output.code)}: ${tail(output.stderr)}`)
-  const report = parseLastJson(output.stdout)
-  validateSmokeReport(report)
-  return { code: output.code, execution: report.execution, child_identities: [report.checks.foreground.child_id, report.checks.background.child_id] }
+    if (output.code !== 0)
+      throw new Error(`OMO sidecar smoke failed with code ${String(output.code)}: ${tail(output.stderr)}`)
+    const report = parseLastJson(output.stdout)
+    validateSmokeReport(report)
+    return {
+      code: output.code,
+      execution: report.execution,
+      child_identities: [report.checks.foreground.child_id, report.checks.background.child_id],
+    }
+  } finally {
+    await rm(smokeDirectory, { recursive: true, force: true })
+  }
 }
 
 async function pollReadyEndpoint(logPath: string, deadline: number) {
@@ -209,7 +235,12 @@ function validateSmokeReport(value: unknown): asserts value is SmokeReport {
   if (value.execution !== "v2-services" || value.external_plugins !== false) {
     throw new Error("OMO sidecar smoke did not exercise the controlled native service graph")
   }
-  if (!isRecord(value.semif) || value.semif.mode !== "controlled" || value.semif.network !== false || value.semif.downloads !== false) {
+  if (
+    !isRecord(value.semif) ||
+    value.semif.mode !== "controlled" ||
+    value.semif.network !== false ||
+    value.semif.downloads !== false
+  ) {
     throw new Error("OMO sidecar smoke did not prove SemIf stayed offline")
   }
   if (!isRecord(value.checks)) throw new Error("OMO sidecar smoke omitted checks")
@@ -230,7 +261,8 @@ function validateSmokeReport(value: unknown): asserts value is SmokeReport {
   const foreground = checks.foreground
   const background = checks.background
   const disposal = checks.disposal
-  if (!isRecord(foreground) || !isRecord(background) || !isRecord(disposal)) throw new Error("OMO sidecar smoke checks are incomplete")
+  if (!isRecord(foreground) || !isRecord(background) || !isRecord(disposal))
+    throw new Error("OMO sidecar smoke checks are incomplete")
   if (
     foreground.ok !== true ||
     foreground.state !== "completed" ||
@@ -239,7 +271,8 @@ function validateSmokeReport(value: unknown): asserts value is SmokeReport {
     typeof foreground.parent_id !== "string" ||
     typeof foreground.child_id !== "string" ||
     foreground.parent_id === foreground.child_id
-  ) throw new Error("OMO sidecar smoke foreground identity/delegation check failed")
+  )
+    throw new Error("OMO sidecar smoke foreground identity/delegation check failed")
   if (
     background.ok !== true ||
     background.started !== true ||
@@ -250,7 +283,8 @@ function validateSmokeReport(value: unknown): asserts value is SmokeReport {
     background.parent_id !== foreground.parent_id ||
     typeof background.child_id !== "string" ||
     background.child_id === foreground.child_id
-  ) throw new Error("OMO sidecar smoke background identity/job check failed")
+  )
+    throw new Error("OMO sidecar smoke background identity/job check failed")
   if (disposal.ok !== true || disposal.active_jobs !== 0 || disposal.services_disposed !== true) {
     throw new Error("OMO sidecar smoke disposal check failed")
   }
@@ -261,10 +295,16 @@ function validateStatus(value: unknown): asserts value is OmoStatus {
   if (value.enabled !== true || value.preset !== "auto" || !sameAgents(value.agents)) {
     throw new Error("/omo/status did not report the native OMO roster")
   }
-  if (!isRecord(value.semif) || value.semif.status !== "disabled" || value.semif.mode !== "off" || value.semif.download !== "never") {
+  if (
+    !isRecord(value.semif) ||
+    value.semif.status !== "disabled" ||
+    value.semif.mode !== "off" ||
+    value.semif.download !== "never"
+  ) {
     throw new Error("/omo/status did not report offline SemIf")
   }
-  if (!isRecord(value.conflict) || value.conflict.active !== false) throw new Error("/omo/status reports a legacy OMO conflict")
+  if (!isRecord(value.conflict) || value.conflict.active !== false)
+    throw new Error("/omo/status reports a legacy OMO conflict")
 }
 
 function isHealth(value: unknown): boolean {
