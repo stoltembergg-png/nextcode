@@ -869,6 +869,7 @@ export const dict = {
   "semif.backend.fallback.no_vendored_binary_vulkan": "Using CPU — Vulkan binary not included in this build",
   "semif.backend.fallback.hip_download_failed": "Using CPU — HIP runtime download failed",
   "semif.backend.fallback.vulkan_download_failed": "Using CPU — Vulkan runtime download failed",
+  "semif.backend.fallback.missing_vulkan_runtime": "Using CPU — Vulkan driver loader missing",
   "semif.backend.fallback.unsupported_variant": "Using CPU — requested backend not available",
   "session.share.popover.title": "ویب پر شائع کریں۔",
   "session.share.popover.description.shared": "یہ سیشن ویب پر عوامی ہے۔ یہ لنک کے ساتھ ہر کسی کے لیے قابل رسائی ہے۔",

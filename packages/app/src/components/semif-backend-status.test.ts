@@ -159,6 +159,7 @@ describe("semifBackendFallbackI18nKey", () => {
     expect(semifBackendFallbackI18nKey("missing_rocm_runtime")).toBe("semif.backend.fallback.missing_rocm_runtime")
     expect(semifBackendFallbackI18nKey("hip_download_failed")).toBe("semif.backend.fallback.hip_download_failed")
     expect(semifBackendFallbackI18nKey("gpu_unsupported")).toBe("semif.backend.fallback.gpu_unsupported")
+    expect(semifBackendFallbackI18nKey("missing_vulkan_runtime")).toBe("semif.backend.fallback.missing_vulkan_runtime")
   })
 
   test("uses unknown key when reason is missing", () => {
@@ -219,6 +220,17 @@ describe("semifBackendMessageKey", () => {
         systemRuntimeMissing: true,
       }),
     ).toBe("semif.backend.system_runtime_missing")
+  })
+
+  test("selects Vulkan loader copy when the ICD is missing", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        backendFallback: true,
+        backendFallbackReason: "missing_vulkan_runtime",
+        systemRuntimeMissing: true,
+      }),
+    ).toBe("semif.backend.fallback.missing_vulkan_runtime")
   })
 
   test("selects fallback reason copy for vendored binary absence when idle", () => {
@@ -369,6 +381,22 @@ describe("semifVulkanFetchInProgress", () => {
         backendRequested: "hip",
       }),
     ).toBe(false)
+  })
+
+  test("auto HIP/ROCm fetch keeps HIP copy when the message is not Vulkan", () => {
+    const snapshot = {
+      ...base(),
+      status: "downloading" as const,
+      backend: "cpu" as const,
+      backendRequested: "auto" as const,
+      backendFallback: false,
+      backendMessage: "semif: fetching HIP runtime",
+    }
+    expect(semifHipFetchInProgress(snapshot)).toBe(true)
+    expect(semifVulkanFetchInProgress(snapshot)).toBe(true)
+    expect(semifBackendDisplayState(snapshot)).toBe("hip_fetch_in_progress")
+    expect(semifBackendMessageKey(snapshot)).toBe("semif.backend.hip_downloading")
+    expect(semifLifecycleStatusKey(snapshot)).toBe("semif.state.downloading_hip_runtime")
   })
 })
 

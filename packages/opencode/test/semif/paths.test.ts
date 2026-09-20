@@ -142,11 +142,52 @@ describe("semif paths", () => {
     mkdirSync(current, { recursive: true })
     writeFileSync(path.join(stale, serverBinaryName()), "stale")
     writeFileSync(path.join(current, serverBinaryName()), "current")
-    writeFileSync(path.join(current, ".vulkan-runtime.json"), "{}")
+    writeFileSync(
+      path.join(current, ".vulkan-runtime.json"),
+      `${JSON.stringify({
+        version: 1,
+        sha256: vulkan.entry.sha256,
+        target: vulkan.target,
+        files: [{ name: serverBinaryName(), bytes: Buffer.byteLength("current") }],
+      })}\n`,
+    )
     try {
       expect(pinnedVulkanSha256()).toBe(vulkan.entry.sha256)
       expect(resolveServerPath({ variant: "vulkan" })).toBe(path.join(current, serverBinaryName()))
       expect(resolveLibsPath({}, "vulkan")).toBe(current)
+    } finally {
+      Object.assign(Global.Path, { data: previousData })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("staged Vulkan path rejects an invalid marker or missing registered files", async () => {
+    if (!hipPlatformSupported()) return
+    const vulkan = await readVulkanLock()
+    if (!vulkan) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-paths-vulkan-incomplete-"))
+    const previousData = Global.Path.data
+    Object.assign(Global.Path, { data: root })
+    const current = vulkanRuntimeDir(vulkan.entry.sha256)
+    mkdirSync(current, { recursive: true })
+    writeFileSync(path.join(current, serverBinaryName()), "current")
+    try {
+      writeFileSync(path.join(current, ".vulkan-runtime.json"), "{}")
+      expect(resolveServerPath({ variant: "vulkan" })).toBeUndefined()
+
+      writeFileSync(
+        path.join(current, ".vulkan-runtime.json"),
+        `${JSON.stringify({
+          version: 1,
+          sha256: vulkan.entry.sha256,
+          target: vulkan.target,
+          files: [
+            { name: serverBinaryName(), bytes: Buffer.byteLength("current") },
+            { name: "ggml-vulkan.so", bytes: 4 },
+          ],
+        })}\n`,
+      )
+      expect(resolveServerPath({ variant: "vulkan" })).toBeUndefined()
     } finally {
       Object.assign(Global.Path, { data: previousData })
       rmSync(root, { recursive: true, force: true })

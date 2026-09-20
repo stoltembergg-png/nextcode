@@ -22,6 +22,7 @@ import {
   hipPlatformSupported,
   readGpuInventory,
   vendoredBinaryExists,
+  vulkanLoaderPresent,
   type BackendPreference,
   type GpuInventory,
 } from "./backend"
@@ -94,6 +95,7 @@ export function shouldFetch(input: {
   readonly serverPath?: string
   readonly env?: Record<string, string | undefined>
   readonly inventory?: GpuInventory
+  readonly loaderPresent?: boolean
 }): boolean {
   if (!hipPlatformSupported()) return false
   if (input.requested === "cpu" || input.requested === "cuda" || input.requested === "hip") return false
@@ -105,6 +107,7 @@ export function shouldFetch(input: {
     if (!amdHipUnsupported(inventory, env)) return false
   }
   if (input.requested === "vulkan" && !inventory.amd) return false
+  if (!(input.loaderPresent ?? vulkanLoaderPresent(env))) return false
   return !vendoredBinaryExists("vulkan", input.serverPath, env)
 }
 

@@ -55,6 +55,7 @@ export const SemifStatusSchema = Schema.Struct({
       "no_vendored_binary",
       "hip_download_failed",
       "vulkan_download_failed",
+      "missing_vulkan_runtime",
       "unsupported_variant",
     ]),
   ),

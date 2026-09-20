@@ -133,6 +133,7 @@ describe("semif HttpApi", () => {
           "no_vendored_binary",
           "hip_download_failed",
           "vulkan_download_failed",
+          "missing_vulkan_runtime",
           "unsupported_variant",
         ],
       ).toContain(body.backendFallbackReason!)
@@ -161,4 +162,5 @@ describe("semif HttpApi", () => {
 test("generated SDK SemifStatus includes vulkan_download_failed", async () => {
   const types = await Bun.file(path.join(import.meta.dir, "../../../sdk/js/src/v2/gen/types.gen.ts")).text()
   expect(types).toContain('"vulkan_download_failed"')
+  expect(types).toContain('"missing_vulkan_runtime"')
 })

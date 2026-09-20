@@ -25,6 +25,7 @@ export type BackendFallbackReason =
   | "no_vendored_binary"
   | "hip_download_failed"
   | "vulkan_download_failed"
+  | "missing_vulkan_runtime"
   | "unsupported_variant"
 
 export interface GpuInventory {
@@ -57,6 +58,7 @@ export interface ResolveInput {
   readonly rocmFetching?: boolean
   readonly vulkanDownloadFailed?: boolean
   readonly vulkanFetching?: boolean
+  readonly vulkanLoaderPresent?: boolean
 }
 
 const HIP_HOSTS = new Set(["win32-x64", "linux-x64"])
@@ -328,6 +330,41 @@ export function stagedRocmRuntimePresent(env: Record<string, string | undefined>
   return rocmRuntimeComplete(dir)
 }
 
+export function vulkanLoaderSearchPaths(
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): string[] {
+  const paths = new Set<string>()
+  const add = (value: string | undefined) => {
+    const trimmed = value?.trim()
+    if (trimmed) paths.add(trimmed)
+  }
+  if (platform === "win32") {
+    add(env.SystemRoot ? path.join(env.SystemRoot, "System32") : undefined)
+    add(env.SYSTEMROOT ? path.join(env.SYSTEMROOT, "System32") : undefined)
+    if (env.PATH) {
+      for (const entry of env.PATH.split(path.delimiter)) add(entry)
+    }
+    return [...paths]
+  }
+  add("/usr/lib/x86_64-linux-gnu")
+  add("/lib/x86_64-linux-gnu")
+  add("/usr/lib")
+  add("/usr/local/lib")
+  if (env.LD_LIBRARY_PATH) {
+    for (const entry of env.LD_LIBRARY_PATH.split(":")) add(entry)
+  }
+  return [...paths]
+}
+
+export function vulkanLoaderPresent(
+  env: Record<string, string | undefined> = process.env,
+  platform = process.platform,
+): boolean {
+  const names = platform === "win32" ? ["vulkan-1.dll"] : ["libvulkan.so.1"]
+  return vulkanLoaderSearchPaths(env, platform).some((dir) => names.some((name) => existsSync(path.join(dir, name))))
+}
+
 export function vendoredBinaryExists(
   variant: BackendVariant,
   serverPath?: string,
@@ -341,6 +378,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
   const env = input.env ?? process.env
   const inventory = input.inventory ?? readGpuInventory()
   const rocmPresent = input.rocmRuntimePresent ?? rocmRuntimePresent(env)
+  const loaderPresent = input.vulkanLoaderPresent ?? vulkanLoaderPresent(env)
 
   if (input.requested === "cpu") {
     return activeCpu(input.requested, "manual_cpu", "semif: using CPU backend (configured)", inventory)
@@ -362,6 +400,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
       inventory,
       vulkanDownloadFailed: input.vulkanDownloadFailed,
       vulkanFetching: input.vulkanFetching,
+      vulkanLoaderPresent: loaderPresent,
     })
   }
 
@@ -408,6 +447,7 @@ export function resolveBackend(input: ResolveInput): BackendStatus {
       inventory,
       vulkanDownloadFailed: input.vulkanDownloadFailed,
       vulkanFetching: input.vulkanFetching,
+      vulkanLoaderPresent: loaderPresent,
     })
   }
 
@@ -549,6 +589,7 @@ function resolveVulkan(input: {
   readonly inventory: GpuInventory
   readonly vulkanDownloadFailed?: boolean
   readonly vulkanFetching?: boolean
+  readonly vulkanLoaderPresent: boolean
 }): BackendStatus {
   if (!hipPlatformSupported()) {
     return fallbackCpu(
@@ -561,6 +602,16 @@ function resolveVulkan(input: {
 
   if (!input.inventory.amd) {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
+  }
+
+  if (!input.vulkanLoaderPresent) {
+    return fallbackCpu(
+      input.requested,
+      "missing_vulkan_runtime",
+      "semif: Vulkan driver loader is not available; using CPU backend",
+      input.inventory,
+      true,
+    )
   }
 
   if (input.vulkanDownloadFailed) {

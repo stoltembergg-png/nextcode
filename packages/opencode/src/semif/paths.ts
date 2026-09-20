@@ -14,11 +14,23 @@
 // directory is keyed by the launcher/libraries content so a new vendored build
 // gets a fresh directory and the old one can be garbage-collected.
 
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
+import { Option, Schema } from "effect"
 import { Global } from "@opencode-ai/core/global"
 import { embeddedLockfile, HOST_TARGETS, hostTarget, lockTargetKey, stagedServerName } from "../../script/fetch-semif-server"
 import type { BackendVariant } from "./backend"
+
+const VULKAN_MARKER_VERSION = 1
+const VulkanRuntimeMarker = Schema.fromJsonString(
+  Schema.Struct({
+    version: Schema.Number,
+    sha256: Schema.String,
+    target: Schema.optional(Schema.String),
+    files: Schema.Array(Schema.Struct({ name: Schema.String, bytes: Schema.Number })),
+  }),
+)
+const decodeVulkanMarker = Schema.decodeUnknownOption(VulkanRuntimeMarker)
 
 export const SERVER_ENV = "NEXTCODE_SEMIF_SERVER_PATH"
 export const SERVER_ENV_FALLBACK = "SEMIF_SERVER_PATH"
@@ -260,17 +272,25 @@ function resolveStagedVulkanLibsPath(env: Record<string, string | undefined>): s
   return dir
 }
 
-function stagedVulkanRuntimeDirComplete(dir: string): boolean {
+function stagedVulkanRuntimeDirComplete(dir: string, sha256: string): boolean {
   const markerPath = path.join(dir, ".vulkan-runtime.json")
-  if (existsSync(markerPath)) return true
-  return existsSync(path.join(dir, serverBinaryName()))
+  if (!existsSync(markerPath)) return false
+  const decoded = decodeVulkanMarker(readFileSync(markerPath, "utf8"))
+  if (Option.isNone(decoded)) return false
+  if (decoded.value.version !== VULKAN_MARKER_VERSION || decoded.value.sha256 !== sha256) return false
+  if (decoded.value.files.length === 0) return false
+  return decoded.value.files.every((file) => {
+    const full = path.join(dir, file.name)
+    if (!existsSync(full)) return false
+    return statSync(full).size === file.bytes
+  })
 }
 
 function readStagedVulkanRuntimeDir(_env: Record<string, string | undefined>): string | undefined {
   const sha256 = pinnedVulkanSha256()
   if (!sha256) return undefined
   const dir = vulkanRuntimeDir(sha256)
-  if (!stagedVulkanRuntimeDirComplete(dir)) return undefined
+  if (!stagedVulkanRuntimeDirComplete(dir, sha256)) return undefined
   return dir
 }
 

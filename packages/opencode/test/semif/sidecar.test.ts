@@ -14,7 +14,7 @@ const layer = Layer.mergeAll(FetchHttpClient.layer, spawner)
 
 const MODEL_PATH = "/models/LFM2-350M-Q4_K_M.gguf"
 
-function handlerFor(modelPath: string) {
+function handlerFor(modelPath: string, nGpuLayers?: number) {
   return (req: Request) => {
     const url = new URL(req.url)
     if (url.pathname === "/health") {
@@ -24,10 +24,16 @@ function handlerFor(modelPath: string) {
       })
     }
     if (url.pathname === "/props") {
-      return new Response(JSON.stringify({ model_path: modelPath }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
+      return new Response(
+        JSON.stringify({
+          model_path: modelPath,
+          ...(nGpuLayers === undefined ? {} : { n_gpu_layers: nGpuLayers }),
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      )
     }
     return new Response("not found", { status: 404 })
   }
@@ -130,6 +136,29 @@ describe("semif sidecar", () => {
     } finally {
       primary.stop(true)
       fallback.stop(true)
+    }
+  })
+
+  test("does not adopt a CPU server when GPU layers are requested", async () => {
+    const server = Bun.serve({ port: 0, fetch: handlerFor(MODEL_PATH, 0) })
+    const port = server.port ?? 0
+    try {
+      const handle = await Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            ensure({
+              ...config(port),
+              nGpuLayers: 99,
+            }),
+            layer,
+          ),
+        ),
+      )
+      expect(handle.adopted).toBe(false)
+    } catch (error) {
+      expect(String(error)).toContain("must not spawn")
+    } finally {
+      server.stop(true)
     }
   })
 })

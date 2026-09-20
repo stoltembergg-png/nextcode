@@ -63,6 +63,7 @@ export interface Handle {
   readonly port: number
   readonly url: string
   readonly modelPath: string
+  readonly nGpuLayers?: number
   readonly adopted: boolean
   readonly pid: number | undefined
   readonly child: ChildProcessHandle | undefined
@@ -106,14 +107,37 @@ const readModelPath = (props: unknown): string | undefined => {
   return undefined
 }
 
+const readGpuLayers = (props: unknown): number | undefined => {
+  if (typeof props !== "object" || props === null) return undefined
+  const record = props as Record<string, unknown>
+  for (const key of ["n_gpu_layers", "nGpuLayers"]) {
+    const value = record[key]
+    if (typeof value === "number" && Number.isFinite(value)) return value
+  }
+  const defaults = record.default_generation_settings
+  if (typeof defaults === "object" && defaults !== null) {
+    const nested = defaults as Record<string, unknown>
+    for (const key of ["n_gpu_layers", "nGpuLayers"]) {
+      const value = nested[key]
+      if (typeof value === "number" && Number.isFinite(value)) return value
+    }
+  }
+  return undefined
+}
+
 type Probe = "match" | "other" | "none"
 
 const probe = (config: SidecarConfig, port: number): Effect.Effect<Probe, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const url = baseUrl(config.host, port)
     if (!(yield* isHealthy(url))) return "none" as Probe
-    const served = readModelPath(yield* readProps(url))
-    if (served && normalizePath(served) === normalizePath(config.modelPath)) return "match" as Probe
+    const props = yield* readProps(url)
+    const served = readModelPath(props)
+    if (served && normalizePath(served) === normalizePath(config.modelPath)) {
+      const layers = readGpuLayers(props)
+      if (layers !== undefined && layers !== (config.nGpuLayers ?? 0)) return "other" as Probe
+      return "match" as Probe
+    }
     return "other" as Probe
   })
 
@@ -184,6 +208,7 @@ export const ensure = Effect.fn("SemifSidecar.ensure")(function* (config: Sideca
       port: located.port,
       url: baseUrl(config.host, located.port),
       modelPath: config.modelPath,
+      nGpuLayers: config.nGpuLayers,
       adopted: true,
       pid: undefined,
       child: undefined,
@@ -200,6 +225,7 @@ export const ensure = Effect.fn("SemifSidecar.ensure")(function* (config: Sideca
     port: located.port,
     url: baseUrl(config.host, located.port),
     modelPath: config.modelPath,
+    nGpuLayers: config.nGpuLayers,
     adopted: false,
     pid: Number(child.pid),
     child,

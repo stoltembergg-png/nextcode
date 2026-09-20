@@ -209,9 +209,12 @@ const layer = Layer.effect(
       const loaded = yield* load
       const current = yield* Ref.get(state)
       if (!current.handle) return
+      const expectedNgl =
+        loaded.backend.active === "hip" || loaded.backend.active === "vulkan" ? 99 : undefined
       const stale =
         loaded.resolved.mode === "off" ||
-        (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath)
+        (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath) ||
+        current.handle.nGpuLayers !== expectedNgl
       if (!stale) return
       yield* SemifSidecar.dispose(current.handle)
       SemifScoring.clearCaches()
@@ -450,16 +453,17 @@ const layer = Layer.effect(
     })
 
     const acquireHandle = Effect.gen(function* () {
-      yield* dropHandleIfStale
       const loaded = yield* load
-      const current = yield* Ref.get(state)
-      if (current.handle) return current.handle
       if (loaded.resolved.mode === "off") {
+        yield* dropHandleIfStale
         return yield* new SemifServiceError({ reason: "semif: disabled (mode=off)" })
       }
       yield* ensureVulkanRuntime
       yield* ensureHipRuntime
       const rocm = yield* ensureRocmRuntime
+      yield* dropHandleIfStale
+      const current = yield* Ref.get(state)
+      if (current.handle) return current.handle
       const refreshed = yield* load
       if (!refreshed.serverPath) {
         return yield* new SemifServiceError({ reason: "semif: llama-server binary is not available" })

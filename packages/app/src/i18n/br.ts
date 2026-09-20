@@ -827,6 +827,7 @@ export const dict = {
   "semif.backend.fallback.missing_rocm_runtime": "Usando CPU — runtime ROCm/HIP do sistema ausente",
   "semif.backend.fallback.hip_download_failed": "Usando CPU — falha ao instalar o runtime HIP",
   "semif.backend.fallback.vulkan_download_failed": "Usando CPU — falha ao baixar o runtime Vulkan",
+  "semif.backend.fallback.missing_vulkan_runtime": "Usando CPU — loader Vulkan do driver ausente",
   "semif.backend.fallback.no_vendored_binary": "Usando CPU — binário HIP não incluso nesta build",
   "semif.backend.fallback.no_vendored_binary_vulkan": "Usando CPU — binário Vulkan não incluído nesta build",
   "semif.backend.fallback.unsupported_variant": "Usando CPU — backend solicitado indisponível",

@@ -2086,6 +2086,7 @@ export type SemifStatus = {
     | "no_vendored_binary"
     | "hip_download_failed"
     | "vulkan_download_failed"
+    | "missing_vulkan_runtime"
     | "unsupported_variant"
   backendMessage?: string
   systemRuntimeMissing: boolean

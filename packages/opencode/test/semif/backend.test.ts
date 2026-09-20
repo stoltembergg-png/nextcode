@@ -60,6 +60,7 @@ describe("semif backend", () => {
         env: { [SERVER_ENV]: cpu },
         inventory,
         rocmRuntimePresent: true,
+        vulkanLoaderPresent: true,
       })
       expect(status.active).toBe("cpu")
       expect(status.fallbackReason).not.toBe("gpu_unsupported")
@@ -72,6 +73,7 @@ describe("semif backend", () => {
         inventory,
         rocmRuntimePresent: true,
         vulkanFetching: true,
+        vulkanLoaderPresent: true,
       })
       expect(fetching.active).toBe("cpu")
       expect(fetching.fallbackReason).not.toBe("gpu_unsupported")
@@ -380,6 +382,7 @@ describe("semif backend", () => {
         env: { [SERVER_ENV]: cpu },
         inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
         rocmRuntimePresent: false,
+        vulkanLoaderPresent: true,
       })
       expect(status.active).toBe("vulkan")
       expect(status.fallback).toBe(false)
@@ -504,10 +507,37 @@ describe("semif backend", () => {
         serverPath: cpu,
         env: { [SERVER_ENV]: cpu },
         inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        vulkanLoaderPresent: true,
       })
       expect(status.active).toBe("vulkan")
       expect(status.fallback).toBe(false)
       expect(status.fallbackReason).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("missing Vulkan loader stays on CPU with missing_vulkan_runtime", () => {
+    if (!hipPlatformSupported()) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-backend-vulkan-icd-"))
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join(root, stagedServerName(triple, "cpu", isZip))
+    const vulkan = path.join(root, stagedServerName(triple, "vulkan", isZip))
+    writeFileSync(cpu, "cpu")
+    writeFileSync(vulkan, "vulkan")
+    try {
+      const status = resolveBackend({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        vulkanLoaderPresent: false,
+      })
+      expect(status.active).toBe("cpu")
+      expect(status.fallback).toBe(true)
+      expect(status.fallbackReason).toBe("missing_vulkan_runtime")
+      expect(status.systemRuntimeMissing).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

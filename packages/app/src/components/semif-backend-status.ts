@@ -96,7 +96,12 @@ export function semifBackendMessageKey(status: SemifStatus | undefined) {
   const state = semifBackendDisplayState(status)
   if (state === "hip_active") return "semif.backend.hip_active"
   if (state === "vulkan_active") return "semif.backend.vulkan_active"
-  if (state === "system_runtime_missing") return "semif.backend.system_runtime_missing"
+  if (state === "system_runtime_missing") {
+    if (status?.backendFallbackReason === "missing_vulkan_runtime") {
+      return "semif.backend.fallback.missing_vulkan_runtime"
+    }
+    return "semif.backend.system_runtime_missing"
+  }
   if (state === "gpu_unsupported") return semifBackendFallbackI18nKey("gpu_unsupported")
   if (state === "cpu_fallback") return semifBackendFallbackI18nKey(status?.backendFallbackReason, status)
   return undefined

@@ -117,6 +117,7 @@ describe("semif service Vulkan fallback state", () => {
       inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
       vulkanDownloadFailed: markReady(afterFailedFetch, {}).vulkanDownloadFailed,
       vulkanFetching: markReady(afterFailedFetch, {}).vulkanFetching,
+      vulkanLoaderPresent: true,
     })
 
     expect(settled.fallbackReason).toBe("vulkan_download_failed")
@@ -138,6 +139,7 @@ describe("semif service Vulkan fallback state", () => {
         env: { [SERVER_ENV]: serverPath },
         inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
         vulkanFetching: true,
+        vulkanLoaderPresent: true,
       })
       expect(fetching.fallbackReason).toBeUndefined()
       expect(fetching.fallback).toBe(false)
@@ -168,6 +170,10 @@ describe("semif service Vulkan fallback state", () => {
     const acquireSlice = source.slice(acquireStart, source.indexOf("const ensureHandle", acquireStart))
     expect(acquireSlice.indexOf("yield* ensureVulkanRuntime")).toBeGreaterThan(-1)
     expect(acquireSlice.indexOf("yield* ensureVulkanRuntime")).toBeLessThan(acquireSlice.indexOf("yield* ensureHipRuntime"))
+    expect(acquireSlice.lastIndexOf("yield* dropHandleIfStale")).toBeGreaterThan(
+      acquireSlice.indexOf("yield* ensureVulkanRuntime"),
+    )
+    expect(source).toContain("current.handle.nGpuLayers !== expectedNgl")
 
     expect(source).toContain("vulkanFetching: current.vulkanFetching")
     expect(source).toContain("vulkanDownloadFailed: current.vulkanDownloadFailed")

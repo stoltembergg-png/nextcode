@@ -24,8 +24,24 @@ describe("semif vulkan runtime", () => {
         serverPath: cpu,
         env: { [SERVER_ENV]: cpu },
         inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        loaderPresent: true,
       }),
     ).toBe(hipPlatformSupported())
+  })
+
+  test("shouldFetch is false when the Vulkan loader is missing", () => {
+    const triple = hostTarget()
+    const isZip = process.platform === "win32"
+    const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
+    expect(
+      shouldFetch({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory: { amd: true, nvidia: false, amdGfx: "gfx803" },
+        loaderPresent: false,
+      }),
+    ).toBe(false)
   })
 
   test("shouldFetch is false for auto on gfx1030", () => {
