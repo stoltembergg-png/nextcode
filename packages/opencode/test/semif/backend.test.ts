@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { hostTarget, stagedServerName } from "../../script/fetch-semif-server"
 import {
   amdGpuUnsupportedForWinHip,
+  amdHipUnsupported,
   gfxFromAmdDeviceId,
   hipPlatformSupported,
   resolveBackend,
@@ -36,6 +37,12 @@ describe("semif backend", () => {
     expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx1030" }, "win32", "x64")).toBe(false)
     expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false }, "win32", "x64")).toBe(false)
     expect(amdGpuUnsupportedForWinHip({ amd: true, nvidia: false, amdGfx: "gfx803" }, "linux", "x64")).toBe(false)
+  })
+
+  test("amdHipUnsupported env-firsts over Windows TheRock inventory", () => {
+    const inventory = { amd: true, nvidia: false, amdGfx: "gfx803" }
+    expect(amdHipUnsupported(inventory, { [GFX_ENV]: "gfx1030" }, "win32", "x64")).toBe(false)
+    expect(amdHipUnsupported(inventory, {}, "win32", "x64")).toBe(true)
   })
 
   test("known unsupported gfx settles before HIP fetch on win32", () => {

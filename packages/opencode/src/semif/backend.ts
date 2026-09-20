@@ -446,7 +446,7 @@ function resolveHip(input: {
     return fallbackCpu(input.requested, "no_amd_gpu", "semif: no AMD GPU detected; using CPU backend", input.inventory)
   }
 
-  if (amdGpuUnsupportedForWinHip(input.inventory)) {
+  if (!input.env[GFX_ENV]?.trim() && amdGpuUnsupportedForWinHip(input.inventory)) {
     return fallbackCpu(
       input.requested,
       "gpu_unsupported",
