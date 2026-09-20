@@ -971,6 +971,17 @@ describe("server session", () => {
     expect(store.data.part[message.id]).toEqual([part])
   })
 
+  test("clears orphan parts when a session is aborted", () => {
+    const message = userMessage("message")
+    const part = textPart(message.id, { text: "live" })
+    const store = setup({ child: session("child") }).store
+
+    store.apply({ type: "message.part.updated", properties: { sessionID: "child", part, time: 2 } })
+    store.apply({ type: "session.aborted", properties: { sessionID: "child" } })
+
+    expect(store.data.part[message.id]).toBeUndefined()
+  })
+
   test("clears stale parts when the initial page has none", async () => {
     const pending = deferredResponse()
     const message = userMessage("message")
