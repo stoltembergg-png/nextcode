@@ -1,14 +1,10 @@
 export * as ConfigOmo from "./omo"
 
 import { Schema } from "effect"
+import { AgentID, AgentIDs, Verification } from "@opencode-ai/schema/omo"
 import { ModelV2 } from "../model"
 
-export const AgentIDs = ["orchestrator", "explore", "librarian", "oracle", "designer", "fixer", "observer"] as const
-export const AgentID = Schema.Literals(AgentIDs).annotate({
-  identifier: "OmoAgentID",
-  description: "Stable native OMO agent identifier",
-})
-export type AgentID = typeof AgentID.Type
+export { AgentID, AgentIDs, Verification } from "@opencode-ai/schema/omo"
 
 export const Preset = Schema.Literals(["auto", "openai", "opencode-go"]).annotate({
   identifier: "OmoPreset",
@@ -27,12 +23,6 @@ export const Routing = Schema.Literals(["auto", "deterministic", "semif"]).annot
   description: "Native OMO routing policy",
 })
 export type Routing = typeof Routing.Type
-
-export const Verification = Schema.Literals(["none", "tests", "oracle", "observer"]).annotate({
-  identifier: "OmoVerification",
-  description: "Native OMO verification default",
-})
-export type Verification = typeof Verification.Type
 
 export const Agent = Schema.Struct({
   model: Schema.String.pipe(Schema.optional),

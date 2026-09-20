@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { RoutingSource } from "@opencode-ai/schema/omo"
 import { ConfigOmo } from "./config/omo"
 import {
   AgentID,
@@ -14,6 +15,8 @@ import {
   Routing,
   Verification,
 } from "./config/omo"
+
+export { RoutingSource } from "@opencode-ai/schema/omo"
 
 import PROMPT_DESIGNER from "./omo/designer.txt"
 import PROMPT_EXPLORE from "./omo/explore.txt"
@@ -37,11 +40,6 @@ export {
   Routing,
   Verification,
 }
-
-export const RoutingSource = Schema.Literals(["semif", "deterministic", "explicit"]).annotate({
-  identifier: "OmoRoutingSource",
-})
-export type RoutingSource = typeof RoutingSource.Type
 
 export const OmoRoutingRequest = Schema.Struct({
   summary: Schema.String,

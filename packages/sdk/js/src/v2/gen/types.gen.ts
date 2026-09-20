@@ -67,6 +67,7 @@ export type Event =
   | EventQuestionV2Asked
   | EventQuestionV2Replied
   | EventQuestionV2Rejected
+  | EventSessionOmoRouting
   | EventTodoUpdated
   | EventLspUpdated
   | EventPermissionAsked
@@ -654,6 +655,12 @@ export type Pty = {
   pid: number
   exitCode?: number
 }
+
+export type OmoAgentId = "orchestrator" | "explore" | "librarian" | "oracle" | "designer" | "fixer" | "observer"
+
+export type OmoRoutingSource = "semif" | "deterministic" | "explicit"
+
+export type OmoVerification = "none" | "tests" | "oracle" | "observer"
 
 export type Todo = {
   /**
@@ -1360,6 +1367,47 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.omo.routing"
+        properties: {
+          sessionID: string
+          assistantMessageID: string
+          toolCallID: string
+          sequence: number
+          startedAt: number
+          updatedAt: number
+          state:
+            | {
+                phase: "analyzing"
+              }
+            | {
+                phase: "selected"
+                agent: OmoAgentId
+                source: OmoRoutingSource
+                background: boolean
+                verification: OmoVerification
+                durationMs: number
+                fallback?:
+                  | "unavailable"
+                  | "timeout"
+                  | "invalid_response"
+                  | "ineligible_response"
+                  | "incomplete_response"
+                  | "policy"
+                  | "single_strategy"
+              }
+            | {
+                phase: "delegating"
+                agent: OmoAgentId
+                source: OmoRoutingSource
+                background: boolean
+              }
+            | {
+                phase: "cleared"
+              }
+        }
+      }
+    | {
+        id: string
         type: "todo.updated"
         properties: {
           sessionID: string
@@ -1694,8 +1742,6 @@ export type OmoAgentConfig = {
 export type OmoBackgroundPolicy = "auto" | "allow" | "deny"
 
 export type OmoRoutingPolicy = "auto" | "deterministic" | "semif"
-
-export type OmoVerification = "none" | "tests" | "oracle" | "observer"
 
 export type PermissionActionConfig = "ask" | "allow" | "deny"
 
@@ -3030,6 +3076,7 @@ export type V2Event =
   | QuestionV2Asked
   | QuestionV2Replied
   | QuestionV2Rejected
+  | SessionOmoRouting
   | TodoUpdated
   | LspUpdated
   | PermissionAsked
@@ -5785,6 +5832,57 @@ export type QuestionV2Rejected = {
   }
 }
 
+export type SessionOmoRouting = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.omo.routing"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    assistantMessageID: string
+    toolCallID: string
+    sequence: number
+    startedAt: number
+    updatedAt: number
+    state:
+      | {
+          phase: "analyzing"
+        }
+      | {
+          phase: "selected"
+          agent: OmoAgentId
+          source: OmoRoutingSource
+          background: boolean
+          verification: OmoVerification
+          durationMs: number
+          fallback?:
+            | "unavailable"
+            | "timeout"
+            | "invalid_response"
+            | "ineligible_response"
+            | "incomplete_response"
+            | "policy"
+            | "single_strategy"
+        }
+      | {
+          phase: "delegating"
+          agent: OmoAgentId
+          source: OmoRoutingSource
+          background: boolean
+        }
+      | {
+          phase: "cleared"
+        }
+  }
+}
+
 export type TodoUpdated = {
   id: string
   metadata?: {
@@ -6963,6 +7061,48 @@ export type EventQuestionV2Rejected = {
   properties: {
     sessionID: string
     requestID: string
+  }
+}
+
+export type EventSessionOmoRouting = {
+  id: string
+  type: "session.omo.routing"
+  properties: {
+    sessionID: string
+    assistantMessageID: string
+    toolCallID: string
+    sequence: number
+    startedAt: number
+    updatedAt: number
+    state:
+      | {
+          phase: "analyzing"
+        }
+      | {
+          phase: "selected"
+          agent: OmoAgentId
+          source: OmoRoutingSource
+          background: boolean
+          verification: OmoVerification
+          durationMs: number
+          fallback?:
+            | "unavailable"
+            | "timeout"
+            | "invalid_response"
+            | "ineligible_response"
+            | "incomplete_response"
+            | "policy"
+            | "single_strategy"
+        }
+      | {
+          phase: "delegating"
+          agent: OmoAgentId
+          source: OmoRoutingSource
+          background: boolean
+        }
+      | {
+          phase: "cleared"
+        }
   }
 }
 
