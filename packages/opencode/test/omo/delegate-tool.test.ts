@@ -283,10 +283,10 @@ describe("native omo_delegate tool", () => {
       const current = runtime({
         activity: OmoRoutingActivity.Service.of({
           start: () => ({
-            analyzing: () => Effect.fail("activity failed"),
-            selected: () => Effect.fail("activity failed"),
-            delegating: () => Effect.fail("activity failed"),
-            clear: () => Effect.fail("activity failed"),
+            analyzing: () => Effect.die("activity failed"),
+            selected: () => Effect.die("activity failed"),
+            delegating: () => Effect.die("activity failed"),
+            clear: () => Effect.die("activity failed"),
           }),
         }),
       })
