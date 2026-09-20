@@ -1191,7 +1191,7 @@ export function createServerSession(
         )
           return
         if (missing) {
-          if (!orphanParts.get(part.sessionID)?.has(part.messageID)) rememberOrphanPart(part.sessionID, part.messageID)
+          rememberOrphanPart(part.sessionID, part.messageID)
           load?.orphanParents.add(part.messageID)
         }
         const deltas = load?.deltaParts.get(part.messageID)

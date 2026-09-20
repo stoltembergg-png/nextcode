@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { failureMessageKey, reset, retryDelay, run, shouldPrepare, shouldWarmup, type Policy } from "../../src/semif/warmup"
+import {
+  failureMessageKey,
+  reset,
+  retryDelay,
+  run,
+  shouldPrepare,
+  shouldWarmup,
+  WARMUP_MAX_ATTEMPTS,
+  type Policy,
+} from "../../src/semif/warmup"
 import type { Status } from "../../src/semif/service"
 
 const status = (overrides: Partial<Status>): Status => ({
@@ -102,6 +111,21 @@ describe("semif warm-up policy", () => {
     )
 
     expect(delays).toEqual([5_000, 5_000])
+  })
+
+  test("bounds automatic retries so permanent failures do not loop forever", async () => {
+    let attempts = 0
+    await Effect.runPromise(
+      run({ mode: "auto", download: "auto" }, Effect.sync(() => {
+        attempts += 1
+        throw new Error("permanent failure")
+      }), {
+        random: () => 0,
+        sleep: () => Effect.void,
+      }),
+    )
+
+    expect(attempts).toBe(WARMUP_MAX_ATTEMPTS)
   })
 
   test("deduplicates similar failure messages", () => {

@@ -21,6 +21,7 @@ export type Policy = Pick<Status, "mode" | "download">
 
 export const WARMUP_RETRY_MIN_MS = 5_000
 export const WARMUP_RETRY_MAX_MS = 5 * 60_000
+export const WARMUP_MAX_ATTEMPTS = 8
 const WARMUP_RETRY_JITTER = 0.2
 const WARMUP_WARNING_DEDUP_MS = 60_000
 
@@ -39,7 +40,7 @@ export const failureMessageKey = (message: string) =>
   message
     .toLowerCase()
     .replace(/[0-9a-f]{8,}/g, "#")
-    .replace(/\d+/g, "#")
+    .replace(/\b\d{6,}\b/g, "#")
     .replace(/\s+/g, " ")
     .trim()
 
@@ -81,10 +82,11 @@ export const run = Effect.fn("SemifWarmup.run")(function* (
 ) {
   if (!shouldWarmup(policy)) return
   const sleep = options.sleep ?? ((milliseconds: number) => Effect.sleep(`${milliseconds} millis`))
+  const maxAttempts = options.maxAttempts ?? WARMUP_MAX_ATTEMPTS
   const warnings = new Map<string, number>()
   let attempt = 0
 
-  while (attempt < (options.maxAttempts ?? Number.POSITIVE_INFINITY)) {
+  while (attempt < maxAttempts) {
     const startedAt = resetGeneration
     const exit = yield* Effect.exit(start)
     if (!Exit.isFailure(exit)) return
@@ -102,7 +104,7 @@ export const run = Effect.fn("SemifWarmup.run")(function* (
     }
 
     const retryAttempt = resetGeneration === startedAt ? attempt : 0
-    if (retryAttempt >= (options.maxAttempts ?? Number.POSITIVE_INFINITY) - 1) return
+    if (retryAttempt >= maxAttempts - 1) return
     yield* sleep(retryDelay(retryAttempt, options.random?.()))
     attempt = resetGeneration === startedAt ? retryAttempt + 1 : 0
   }

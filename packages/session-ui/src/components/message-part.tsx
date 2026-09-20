@@ -262,6 +262,7 @@ export const PART_MAPPING: Record<string, PartComponent | undefined> = {}
 const TEXT_RENDER_PACE_MS = 24
 const TEXT_RENDER_IMMEDIATE = 512
 const TEXT_RENDER_SNAP = /[\s.,!?;:)\]]/
+const SEMIF_OUTPUT_PACE_MS = 5
 
 function step(size: number) {
   if (size <= 12) return 2
