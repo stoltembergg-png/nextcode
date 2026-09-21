@@ -244,7 +244,7 @@ export function BasicTool(props: BasicToolProps) {
                       </Show>
                     </Show>
                   </div>
-                  <Show when={!pending() && title().action}>
+                  <Show when={title().action}>
                     <span data-slot="basic-tool-tool-action">{title().action}</span>
                   </Show>
                 </div>

@@ -17,4 +17,27 @@ describe("BasicTool", () => {
     dispose()
     host.remove()
   })
+
+  test("trigger action stays visible while status is running", () => {
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const dispose = render(
+      () => (
+        <BasicTool
+          icon="brain"
+          status="running"
+          trigger={{
+            title: "Thinking",
+            action: <span data-slot="test-action">1s</span>,
+          }}
+        />
+      ),
+      host,
+    )
+    const action = host.querySelector('[data-slot="basic-tool-tool-action"]')
+    expect(action).toBeTruthy()
+    expect(action?.textContent).toContain("1s")
+    dispose()
+    host.remove()
+  })
 })
