@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf squashfs-tools
 
       - name: Download the Linux sidecar
         uses: actions/download-artifact@v8
@@ -120,6 +120,14 @@ jobs:
         # diagnosable. See crates/tauri-bundler/.../linuxdeploy.rs
         run: bun run tauri build --verbose --config src-tauri/tauri.linux.conf.json --bundles appimage
 
+      - name: Un-bundle libwayland from the AppImage
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find packages/desktop/src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -name "*.AppImage" -print -quit)
+          test -n "$APPIMAGE"
+          APPIMAGE=$(readlink -f "$APPIMAGE")
+          bun packages/desktop/scripts/unbundle-appimage-wayland.ts "$APPIMAGE"
+
       - name: Assert the AppImage payload
         run: |
           set -euo pipefail
@@ -131,19 +139,22 @@ jobs:
             exit 1
           fi
           echo "appimage: $APPIMAGE"
+          APPIMAGE=$(readlink -f "$APPIMAGE")
           test -f "$APPIMAGE"
 
           chmod +x "$APPIMAGE"
           WORK=$(mktemp -d)
           cd "$WORK"
-          set +e
-          "$APPIMAGE" --appimage-extract >/extract.log 2>&1
-          EXTRACT=$?
-          set -e
-          if [ "$EXTRACT" -ne 0 ] || [ ! -d squashfs-root ]; then
-            echo "WARN: --appimage-extract failed; merge gate is the AppImage file existing"
-            cat extract.log 2>/dev/null || true
-            exit 0
+          OFFSET=$("$APPIMAGE" --appimage-offset)
+          unsquashfs -f -o "$OFFSET" -d squashfs-root "$APPIMAGE"
+          if [ ! -d squashfs-root ]; then
+            echo "FAIL: unsquashfs produced no squashfs-root"
+            exit 1
+          fi
+          if find squashfs-root -name 'libwayland-*.so*' | grep -q .; then
+            echo "FAIL: AppImage still bundles libwayland (EGL_BAD_PARAMETER on newer Mesa)"
+            find squashfs-root -name 'libwayland-*.so*'
+            exit 1
           fi
 
           DESKTOP_BIN=$(find squashfs-root -type f -name "opencode-desktop" | head -1)

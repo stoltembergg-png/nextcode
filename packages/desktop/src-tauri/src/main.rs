@@ -1515,7 +1515,53 @@ fn write_debug_zip(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn host_libwayland_client() -> Option<std::path::PathBuf> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
+        "/lib/x86_64-linux-gnu/libwayland-client.so.0",
+        "/usr/lib64/libwayland-client.so.0",
+        "/usr/lib/libwayland-client.so.0",
+        "/lib64/libwayland-client.so.0",
+    ];
+    CANDIDATES.iter().map(std::path::PathBuf::from).find(|path| path.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn prepend_preload(wayland: &std::path::Path) -> String {
+    let wayland = wayland.to_string_lossy();
+    match std::env::var("LD_PRELOAD") {
+        Ok(existing) if !existing.is_empty() && existing.split(':').any(|part| part == wayland) => existing,
+        Ok(existing) if !existing.is_empty() => format!("{wayland}:{existing}"),
+        _ => wayland.into_owned(),
+    }
+}
+
 fn main() {
+    // WebKitGTK DMA-BUF + NVIDIA/AppImage EGL aborts the web process and leaves a gray
+    // window (EGL_BAD_PARAMETER). Set before the webview exists so WebKitWebProcess inherits it.
+    // https://v2.tauri.app/develop/debug/linux-graphics/  tauri-apps/tauri#9394
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+        // linuxdeploy ships an older libwayland than host Mesa; WebKit then aborts with
+        // EGL_BAD_PARAMETER even after DMA-BUF is off. Force X11/XWayland for AppImage
+        // and preload the host client so WebKitWebProcess does not pick the bundled one.
+        if std::env::var_os("APPIMAGE").is_some() {
+            if std::env::var_os("GDK_BACKEND").is_none() {
+                std::env::set_var("GDK_BACKEND", "x11");
+            }
+            if let Some(wayland) = host_libwayland_client() {
+                std::env::set_var("LD_PRELOAD", prepend_preload(&wayland));
+            }
+        }
+    }
+
     // Surface shell panics in the log file as well: the default hook only writes to stderr, which
     // a packaged Windows build has no console for, so `export_debug_logs` would miss them. Keep the
     // default hook so the message still reaches stderr when a console exists.
@@ -1743,6 +1789,15 @@ fn main() {
             }
 
             restore_window_state(&handle);
+            #[cfg(target_os = "linux")]
+            log::info!(
+                "[window] linux webkit DMA-BUF={:?} compositing={:?} gdk={:?} preload={:?} appimage={}",
+                std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE"),
+                std::env::var_os("GDK_BACKEND"),
+                std::env::var_os("LD_PRELOAD"),
+                std::env::var_os("APPIMAGE").is_some()
+            );
 
             // Windows parity with Electron's `titleBarOverlay`: decorum draws the
             // native-style caption controls into `[data-tauri-decorum-tb]`.
