@@ -98,6 +98,7 @@ const names = [
   "branch",
   "edit",
   "help",
+  "question",
   "settings-gear",
   "dash",
   "cloud-upload",

@@ -20,6 +20,7 @@ import { Accordion } from "@opencode-ai/ui/accordion"
 import { Button } from "@opencode-ai/ui/button"
 import { Card } from "@opencode-ai/ui/card"
 import {
+  BasicTool,
   EditToolGroup,
   Message,
   MessageDivider,
@@ -78,6 +79,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { routingStatusLabel } from "./omo-routing-status"
+import { openRequestKinds } from "./request-row"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -263,6 +265,18 @@ export function MessageTimeline(props: {
   setRevealMessage?: (fn: (id: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
   setHistoryAnchor?: (handlers: { capture: () => void; restore: (done: boolean) => void }) => void
+  requests?: {
+    permission?: {
+      title: string
+      target: string
+      body: JSX.Element
+    }
+    question?: {
+      title: string
+      target: string
+      body: JSX.Element
+    }
+  }
 }) {
   let touchGesture: number | undefined
 
@@ -274,6 +288,12 @@ export function MessageTimeline(props: {
   const dialog = useDialog()
   const sessionArchive = useSessionArchive()
   const language = useLanguage()
+  const openRequests = createMemo(() =>
+    openRequestKinds({
+      permission: !!props.requests?.permission,
+      question: !!props.requests?.question,
+    }),
+  )
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
@@ -1023,7 +1043,16 @@ export function MessageTimeline(props: {
     const part = createMemo(() => {
       const group = row().group
       if (group.type !== "part") return
-      return getMsgPart(group.ref.messageID, group.ref.partID)
+      const item = getMsgPart(group.ref.messageID, group.ref.partID)
+      if (!item) return
+      if (
+        props.requests?.question &&
+        item.type === "tool" &&
+        item.tool === "question" &&
+        (item.state.status === "pending" || item.state.status === "running")
+      )
+        return
+      return item
     })
     const defaultOpen = createMemo(() => {
       const item = part()
@@ -1861,6 +1890,44 @@ export function MessageTimeline(props: {
             />
           </Show>
         </div>
+        <Show when={openRequests().includes("permission") ? props.requests?.permission : undefined}>
+          {(request) => (
+            <div
+              classList={{
+                "min-w-0 w-full max-w-full px-4 md:px-5 pb-3": true,
+                "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
+              }}
+            >
+              <BasicTool
+                icon="warning"
+                status="running"
+                allowOpenWhilePending
+                trigger={{ title: request().title, subtitle: request().target }}
+              >
+                {request().body}
+              </BasicTool>
+            </div>
+          )}
+        </Show>
+        <Show when={openRequests().includes("question") ? props.requests?.question : undefined}>
+          {(request) => (
+            <div
+              classList={{
+                "min-w-0 w-full max-w-full px-4 md:px-5 pb-3": true,
+                "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
+              }}
+            >
+              <BasicTool
+                icon="question"
+                status="running"
+                allowOpenWhilePending
+                trigger={{ title: request().title, subtitle: request().target }}
+              >
+                {request().body}
+              </BasicTool>
+            </div>
+          )}
+        </Show>
       </ScrollView>
     </div>
   )

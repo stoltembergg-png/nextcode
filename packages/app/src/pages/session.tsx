@@ -71,6 +71,8 @@ import {
   SessionComposerRegion,
 } from "@/pages/session/composer"
 import { ComposerStripBody, composerStrip } from "@/pages/session/composer/session-composer-strip"
+import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
+import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { createOpenReviewFile, createSessionTabs, createSizing, shouldShowFileTree } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
@@ -1556,6 +1558,36 @@ export default function Page() {
     if (el) scheduleScrollState(el)
   }
 
+  const permissionRequestRow = createMemo(() => {
+    const request = composer.permissionRequest()
+    if (!request) return
+    return {
+      title: language.t("notification.permission.title"),
+      target: request.patterns.join(", "),
+      body: (
+        <SessionPermissionDock
+          request={request}
+          responding={composer.permissionResponding()}
+          onDecide={(response) => {
+            resumeScroll()
+            composer.decide(response)
+          }}
+        />
+      ),
+    }
+  })
+
+  const questionRequestRow = createMemo(() => {
+    const request = composer.questionRequest()
+    if (!request) return
+    const total = request.questions.length
+    return {
+      title: language.t("session.question.progress", { current: Math.min(1, total), total }),
+      target: request.questions[0]?.question ?? "",
+      body: <SessionQuestionDock request={request} onSubmit={resumeScroll} />,
+    }
+  })
+
   // When the user returns to the bottom, treat the active message as "latest".
   createEffect(
     on(
@@ -2120,6 +2152,10 @@ export default function Page() {
                   }}
                   setScrollToEnd={(fn) => {
                     scrollToEnd = fn
+                  }}
+                  requests={{
+                    permission: permissionRequestRow(),
+                    question: questionRequestRow(),
                   }}
                 />
               )}

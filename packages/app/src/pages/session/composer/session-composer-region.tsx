@@ -1,8 +1,6 @@
 import { Show, type JSX } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
-import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
-import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import type { SessionComposerRegionController } from "./session-composer-region-controller"
 
@@ -30,29 +28,6 @@ export function SessionComposerRegion(props: {
           "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": controller.centered(),
         }}
       >
-        <Show when={controller.state.questionRequest()} keyed>
-          {(request) => (
-            <div>
-              <SessionQuestionDock request={request} onSubmit={controller.onResponseSubmit} />
-            </div>
-          )}
-        </Show>
-
-        <Show when={controller.state.permissionRequest()} keyed>
-          {(request) => (
-            <div>
-              <SessionPermissionDock
-                request={request}
-                responding={controller.state.permissionResponding()}
-                onDecide={(response) => {
-                  controller.onResponseSubmit()
-                  controller.state.decide(response)
-                }}
-              />
-            </div>
-          )}
-        </Show>
-
         <Show when={controller.showComposer()}>
           <Show
             when={controller.promptReady()}

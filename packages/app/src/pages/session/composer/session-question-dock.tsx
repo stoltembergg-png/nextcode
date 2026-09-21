@@ -2,7 +2,6 @@ import { For, Show, createEffect, createMemo, onCleanup, onMount, type Component
 import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
-import { DockPrompt } from "@opencode-ai/session-ui/dock-prompt"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
 import { showToast } from "@/utils/toast"
@@ -453,12 +452,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   return (
     <div data-component="session-question-dock">
-      <DockPrompt
-        kind="question"
-        ref={(el) => (root = el)}
-        onKeyDown={nav}
-        header={
-          <>
+      <div data-component="dock-prompt" data-kind="question" ref={(el) => (root = el)} onKeyDown={nav}>
+        <div data-slot="question-body">
+          <div data-slot="question-header">
             <div data-slot="question-header-title">{summary()}</div>
             <div data-slot="question-header-actions">
               <Show when={total() > 1}>
@@ -492,32 +488,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                 <Icon name="chevron-down" size="small" />
               </button>
             </div>
-          </>
-        }
-        footer={
-          <>
-            <Button variant="ghost" size="large" disabled={sending()} onClick={reject} aria-keyshortcuts="Escape">
-              {language.t("ui.common.dismiss")}
-            </Button>
-            <div data-slot="question-footer-actions">
-              <Show when={store.tab > 0}>
-                <Button variant="secondary" size="large" disabled={sending()} onClick={back}>
-                  {language.t("ui.common.back")}
-                </Button>
-              </Show>
-              <Button
-                variant={last() ? "primary" : "secondary"}
-                size="large"
-                disabled={sending()}
-                onClick={next}
-                aria-keyshortcuts="Meta+Enter Control+Enter"
-              >
-                {last() ? language.t("ui.common.submit") : language.t("ui.common.next")}
-              </Button>
-            </div>
-          </>
-        }
-      >
+          </div>
+          <div data-slot="question-content">
         <div
           data-slot="question-text"
           style={{
@@ -634,7 +606,30 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             </form>
           </Show>
         </div>
-      </DockPrompt>
+        </div>
+        </div>
+        <div data-slot="question-footer">
+          <Button variant="ghost" size="large" disabled={sending()} onClick={reject} aria-keyshortcuts="Escape">
+            {language.t("ui.common.dismiss")}
+          </Button>
+          <div data-slot="question-footer-actions">
+            <Show when={store.tab > 0}>
+              <Button variant="secondary" size="large" disabled={sending()} onClick={back}>
+                {language.t("ui.common.back")}
+              </Button>
+            </Show>
+            <Button
+              variant={last() ? "primary" : "secondary"}
+              size="large"
+              disabled={sending()}
+              onClick={next}
+              aria-keyshortcuts="Meta+Enter Control+Enter"
+            >
+              {last() ? language.t("ui.common.submit") : language.t("ui.common.next")}
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
