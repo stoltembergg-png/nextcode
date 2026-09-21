@@ -16,6 +16,7 @@ import {
   createSignal,
   on,
   onMount,
+  type JSX,
   type ParentProps,
   untrack,
 } from "solid-js"
@@ -70,6 +71,9 @@ import {
   createSessionComposerRegionController,
   SessionComposerRegion,
 } from "@/pages/session/composer"
+import { ComposerStripBody, composerStrip } from "@/pages/session/composer/session-composer-strip"
+import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
+import { questionActivity, SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { createOpenReviewFile, createSessionTabs, createSizing, shouldShowFileTree } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
@@ -1555,6 +1559,68 @@ export default function Page() {
     if (el) scheduleScrollState(el)
   }
 
+  const permissionRequestRow = createMemo(() => {
+    const request = composer.permissionRequest()
+    if (!request) return
+    return {
+      title: language.t("notification.permission.title"),
+      target: request.patterns.join(", "),
+      body: (
+        <SessionPermissionDock
+          request={request}
+          responding={composer.permissionResponding()}
+          onDecide={(response) => {
+            resumeScroll()
+            composer.decide(response)
+          }}
+        />
+      ),
+    }
+  })
+
+  const [questionActive, setQuestionActive] = createSignal<{ id: string; current: number; prompt: string }>()
+  const questionDock = createMemo((prev?: { id: string; body: JSX.Element }) => {
+    const request = composer.questionRequest()
+    if (!request) return
+    if (prev?.id === request.id) return prev
+    const id = request.id
+    return {
+      id,
+      body: (
+        <SessionQuestionDock
+          request={composer.questionRequest() ?? request}
+          onSubmit={resumeScroll}
+          onActive={(active) => {
+            setQuestionActive((current) => {
+              if (current?.id === id && current.current === active.current && current.prompt === active.prompt)
+                return current
+              return { id, current: active.current, prompt: active.prompt }
+            })
+          }}
+        />
+      ),
+    }
+  })
+
+  const questionRequestRow = createMemo(() => {
+    const request = composer.questionRequest()
+    const dock = questionDock()
+    if (!request || !dock) return
+    const active = questionActive()
+    const live = active?.id === request.id ? active : undefined
+    const seeded = questionActivity({ scope: serverSDK().scope, request })
+    const total = request.questions.length
+    return {
+      title: language.t("session.question.progress", {
+        current: live ? Math.min(live.current, total) : seeded.current,
+        total,
+      }),
+      target: live?.prompt ?? seeded.prompt,
+      body: dock.body,
+      tool: request.tool,
+    }
+  })
+
   // When the user returns to the bottom, treat the active message as "latest".
   createEffect(
     on(
@@ -2120,6 +2186,10 @@ export default function Page() {
                   setScrollToEnd={(fn) => {
                     scrollToEnd = fn
                   }}
+                  requests={{
+                    permission: permissionRequestRow(),
+                    question: questionRequestRow(),
+                  }}
                 />
               )}
             </Show>
@@ -2236,7 +2306,39 @@ export default function Page() {
                         setFollowup("paused", id, true)
                       },
                     })
-                    return <PromptInputV2Composer controller={controller} borderUnderlay />
+                    const [stripExpanded, setStripExpanded] = createSignal(false)
+                    const revertItems = rolled()
+                    return (
+                      <PromptInputV2Composer
+                        controller={controller}
+                        borderUnderlay
+                        strip={composerStrip({
+                          todos: composer.todos(),
+                          revertCount: revertItems.length,
+                          expanded: stripExpanded(),
+                          onToggle: () => setStripExpanded((value) => !value),
+                          body: stripExpanded()
+                            ? (
+                                <ComposerStripBody
+                                  todos={composer.todos()}
+                                  revert={
+                                    revertItems.length > 0
+                                      ? {
+                                          items: revertItems,
+                                          restoring: restoring(),
+                                          disabled: reverting(),
+                                          onRestore: restore,
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              )
+                            : undefined,
+                          todoLabel: (done, total) => language.t("session.todo.progress", { done, total }),
+                          revertLabel: (count) => language.plural("session.revertDock.summary", count),
+                        })}
+                      />
+                    )
                   }}
                 </Show>
               }

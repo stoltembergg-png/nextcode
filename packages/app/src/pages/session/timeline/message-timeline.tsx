@@ -20,6 +20,7 @@ import { Accordion } from "@opencode-ai/ui/accordion"
 import { Button } from "@opencode-ai/ui/button"
 import { Card } from "@opencode-ai/ui/card"
 import {
+  BasicTool,
   EditToolGroup,
   Message,
   MessageDivider,
@@ -78,6 +79,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { routingStatusLabel } from "./omo-routing-status"
+import { openQuestionPart, openRequestKinds, requestRowOffset, requestScrollPadding, timelinePaddingEnd } from "./request-row"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -263,6 +265,22 @@ export function MessageTimeline(props: {
   setRevealMessage?: (fn: (id: string) => void) => void
   setScrollToEnd?: (fn: () => void) => void
   setHistoryAnchor?: (handlers: { capture: () => void; restore: (done: boolean) => void }) => void
+  requests?: {
+    permission?: {
+      title: string
+      target: string
+      body: JSX.Element
+    }
+    question?: {
+      title: string
+      target: string
+      body: JSX.Element
+      tool?: {
+        messageID: string
+        callID: string
+      }
+    }
+  }
 }) {
   let touchGesture: number | undefined
 
@@ -274,6 +292,12 @@ export function MessageTimeline(props: {
   const dialog = useDialog()
   const sessionArchive = useSessionArchive()
   const language = useLanguage()
+  const openRequests = createMemo(() =>
+    openRequestKinds({
+      permission: !!props.requests?.permission,
+      question: !!props.requests?.question,
+    }),
+  )
   const { params, sessionKey } = useSessionKey()
   const ownerSessionKey = sessionKey()
   const cached = timelineCache.get(ownerSessionKey)
@@ -426,6 +450,8 @@ export function MessageTimeline(props: {
 
   const [toolOpen, setToolOpen] = createStore<Record<string, boolean | undefined>>(cached?.toolOpen ?? {})
   const [renderOverscan, setRenderOverscan] = createSignal(initialMeasurements?.length || coldBottomMount ? 6 : 20)
+  const [requestBlock, setRequestBlock] = createSignal<HTMLDivElement>()
+  const [requestEnd, setRequestEnd] = createSignal(0)
   let resizePinnedIndexes: number[] = []
   let resizePinFrame: number | undefined
   let virtualContent: HTMLDivElement | undefined
@@ -459,7 +485,9 @@ export function MessageTimeline(props: {
       return showHeader() ? 64 : 0
     },
     overscan: 50,
-    paddingEnd: 64,
+    get paddingEnd() {
+      return requestScrollPadding(requestEnd())
+    },
     rangeExtractor: (range) => {
       const id = activeMessageID()
       const active = id ? (messageLastRowIndex().get(id) ?? -1) : -1
@@ -470,6 +498,10 @@ export function MessageTimeline(props: {
       )
     },
   })
+  const scrollAnchoredEnd = () => {
+    if (virtualContent) virtualContent.style.height = `${virtualizer.getTotalSize()}px`
+    virtualizer.scrollToEnd()
+  }
   const resizeItem = virtualizer.resizeItem
   let resizeAnchorScheduled = false
   const anchorResizedBottom = () => {
@@ -478,7 +510,7 @@ export function MessageTimeline(props: {
     queueMicrotask(() => {
       resizeAnchorScheduled = false
       if (!props.shouldAnchorBottom() || props.hasScrollGesture()) return
-      virtualizer.scrollToEnd()
+      scrollAnchoredEnd()
     })
   }
   virtualizer.resizeItem = (index, size) => {
@@ -519,35 +551,49 @@ export function MessageTimeline(props: {
       if (index === undefined) return
       virtualizer.scrollToIndex(index, { align: "center" })
     })
-    props.setScrollToEnd?.(() => virtualizer.scrollToEnd())
+    props.setScrollToEnd?.(() => scrollAnchoredEnd())
     props.setHistoryAnchor?.({ capture: capturePrependAnchor, restore: restorePrependAnchor })
   })
 
   let overscanFrame: number | undefined
   onMount(() => {
     overscanFrame = requestAnimationFrame(() => {
-      if (props.shouldAnchorBottom()) virtualizer.scrollToEnd()
+      if (props.shouldAnchorBottom()) scrollAnchoredEnd()
       overscanFrame = requestAnimationFrame(() => {
         overscanFrame = undefined
         if (renderOverscan() < 20) setRenderOverscan(20)
-        if (props.shouldAnchorBottom()) virtualizer.scrollToEnd()
+        if (props.shouldAnchorBottom()) scrollAnchoredEnd()
       })
     })
   })
 
   const maybeAnchorBottom = () => {
-    if (timelineRows().length === 0) return
+    if (timelineRows().length === 0 && requestEnd() === 0) return
     if (!props.shouldAnchorBottom() || props.hasScrollGesture()) return
     if (resizePinFrame !== undefined) cancelAnimationFrame(resizePinFrame)
     clearPrependAnchor()
     if (prependAnchorFrame !== undefined) cancelAnimationFrame(prependAnchorFrame)
-    virtualizer.scrollToEnd()
+    scrollAnchoredEnd()
   }
+
+  createEffect(() => {
+    const element = openRequests().length > 0 ? requestBlock() : undefined
+    if (!element) {
+      setRequestEnd(0)
+      return
+    }
+    const measure = () => setRequestEnd(Math.ceil(element.getBoundingClientRect().height))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    onCleanup(() => observer.disconnect())
+  })
 
   let measuredSessionKey = sessionKey()
   createEffect(() => {
     const key = sessionKey()
     timelineRows().length
+    requestEnd()
     if (measuredSessionKey !== key) {
       measuredSessionKey = key
       virtualizer.measure()
@@ -1023,7 +1069,10 @@ export function MessageTimeline(props: {
     const part = createMemo(() => {
       const group = row().group
       if (group.type !== "part") return
-      return getMsgPart(group.ref.messageID, group.ref.partID)
+      const item = getMsgPart(group.ref.messageID, group.ref.partID)
+      if (!item) return
+      if (item.type === "tool" && openQuestionPart(props.requests?.question, item)) return
+      return item
     })
     const defaultOpen = createMemo(() => {
       const item = part()
@@ -1857,8 +1906,61 @@ export function MessageTimeline(props: {
               data-timeline-row="bottom-spacer"
               aria-hidden="true"
               class="h-16 absolute top-0 left-0 w-full"
-              style={{ transform: `translateY(${virtualizer.getTotalSize() - 64}px)` }}
+              style={{ transform: `translateY(${virtualizer.getTotalSize() - timelinePaddingEnd}px)` }}
             />
+          </Show>
+          <Show when={openRequests().length > 0}>
+            <div
+              data-timeline-requests
+              ref={setRequestBlock}
+              class="absolute top-0 left-0 w-full"
+              style={{
+                transform: `translateY(${requestRowOffset({
+                  totalSize: virtualizer.getTotalSize(),
+                  requestHeight: requestEnd(),
+                  scrollMargin: showHeader() ? 64 : 0,
+                })}px)`,
+              }}
+            >
+              <Show when={openRequests().includes("permission") ? props.requests?.permission : undefined}>
+                {(request) => (
+                  <div
+                    classList={{
+                      "min-w-0 w-full max-w-full px-4 md:px-5 pb-3": true,
+                      "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
+                    }}
+                  >
+                    <BasicTool
+                      icon="warning"
+                      status="running"
+                      allowOpenWhilePending
+                      trigger={{ title: request().title, subtitle: request().target }}
+                    >
+                      {request().body}
+                    </BasicTool>
+                  </div>
+                )}
+              </Show>
+              <Show when={openRequests().includes("question") ? props.requests?.question : undefined}>
+                {(request) => (
+                  <div
+                    classList={{
+                      "min-w-0 w-full max-w-full px-4 md:px-5 pb-3": true,
+                      "md:max-w-200 md:mx-auto 2xl:max-w-[1000px]": props.centered,
+                    }}
+                  >
+                    <BasicTool
+                      icon="question"
+                      status="running"
+                      allowOpenWhilePending
+                      trigger={{ title: request().title, subtitle: request().target }}
+                    >
+                      {request().body}
+                    </BasicTool>
+                  </div>
+                )}
+              </Show>
+            </div>
           </Show>
         </div>
       </ScrollView>

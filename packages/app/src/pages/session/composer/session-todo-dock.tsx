@@ -209,14 +209,14 @@ export function SessionTodoDock(props: {
             opacity: `${Math.max(0, Math.min(1, 1 - hide()))}`,
           }}
         >
-          <TodoList todos={props.todos} />
+          <SessionTodoList todos={props.todos} />
         </div>
       </div>
     </Dynamic>
   )
 }
 
-function TodoList(props: { todos: Todo[] }) {
+export function SessionTodoList(props: { todos: Todo[]; compact?: boolean }) {
   const [store, setStore] = createStore({
     stuck: false,
   })
@@ -224,7 +224,7 @@ function TodoList(props: { todos: Todo[] }) {
   return (
     <div class="relative">
       <div
-        class="px-3 pb-11 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar"
+        class={`px-3 ${props.compact ? "pb-3" : "pb-11"} flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar`}
         style={{ "overflow-anchor": "none" }}
         onScroll={(e) => {
           setStore("stuck", e.currentTarget.scrollTop > 0)

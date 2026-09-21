@@ -1,7 +1,6 @@
 import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
-import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -34,6 +33,13 @@ export type {
 
 export type PromptInputV2Mode = "normal" | "shell"
 
+export type PromptInputV2Strip = {
+  label: string
+  expanded: boolean
+  onToggle: () => void
+  body?: JSX.Element
+}
+
 export type PromptInputV2Props = {
   controller: PromptInputV2Interaction
   disabled?: boolean
@@ -44,6 +50,7 @@ export type PromptInputV2Props = {
   variantControlVisible?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
+  strip?: PromptInputV2Strip
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
@@ -110,7 +117,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
       <form
         data-component="prompt-input-v2"
         data-dock-border-underlay={props.borderUnderlay ? "v2" : undefined}
-        class="group/prompt-input relative min-h-[96px] w-full overflow-clip rounded-xl bg-v2-background-bg-base"
+        class="group/prompt-input relative w-full overflow-clip rounded-xl bg-v2-background-bg-base"
         classList={{
           "shadow-[var(--v2-elevation-raised)]": !props.borderUnderlay,
           "border border-v2-icon-icon-info border-dashed": state.drag === "active",
@@ -130,6 +137,22 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </div>
         </Show>
 
+        <Show when={props.strip}>
+          {(strip) => (
+            <div data-slot="prompt-strip">
+              <button
+                type="button"
+                data-slot="prompt-strip-toggle"
+                class="w-full px-4 text-start text-[12px] text-v2-text-text-muted"
+                onClick={() => strip().onToggle()}
+              >
+                {strip().label}
+              </button>
+              <Show when={strip().expanded}>{strip().body}</Show>
+            </div>
+          )}
+        </Show>
+
         <Show when={state.mode === "normal"}>
           <PromptInputV2Attachments
             attachments={props.controller.attachments()}
@@ -143,7 +166,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
           />
         </Show>
 
-        <div class="relative min-h-[60px]">
+        <div class="relative">
           <div
             ref={(element) => {
               editor = element
@@ -160,7 +183,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
             spellcheck={state.mode === "normal"}
             // @ts-expect-error
             autocomplete="off"
-            class="relative z-10 block min-h-[60px] max-h-[180px] w-full overflow-y-auto whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none empty:before:content-['\200B'] [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
+            class="relative z-10 block max-h-[180px] w-full overflow-y-auto whitespace-pre-wrap bg-transparent px-4 pt-4 pb-2 text-[13px] font-[440] leading-5 text-v2-text-text-base focus:outline-none empty:before:content-['\200B'] [&_[data-mention=file]]:text-syntax-property [&_[data-mention=agent]]:text-syntax-type [&_[data-mention=reference]]:text-syntax-keyword"
             classList={{ "font-mono!": state.mode === "shell", "opacity-50": props.disabled }}
             onInput={(event) => {
               const cursor = promptInputV2Cursor(event.currentTarget)
@@ -195,7 +218,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </Show>
         </div>
 
-        <div class="flex h-11 items-center px-2">
+        <div data-slot="prompt-toolbar" class="flex items-center px-2 py-1.5">
           <div
             class="flex min-w-0 flex-1 items-center gap-1"
             aria-hidden={state.mode === "shell"}
@@ -684,18 +707,19 @@ export function PromptInputV2SubmitButton(props: {
       inactive={!props.stopping && props.disabled}
       value={props.stopping ? props.stopLabel : props.sendLabel}
     >
-      <IconButton
+      <IconButtonV2
         data-action="prompt-submit"
         type="button"
         disabled={!props.stopping && props.disabled}
         tabIndex={props.mode === "normal" ? undefined : -1}
-        icon={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
-        variant="primary"
-        class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
-        style={{
-          "background-image":
-            "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
-        }}
+        variant="contrast"
+        size="small"
+        icon={
+          <Icon
+            name={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
+            size="small"
+          />
+        }
         aria-label={props.stopping ? props.stopLabel : props.sendLabel}
         onClick={(event) => {
           event.preventDefault()

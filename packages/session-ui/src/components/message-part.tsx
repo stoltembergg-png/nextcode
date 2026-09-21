@@ -605,6 +605,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
 }
 
 export { partDefaultOpen } from "./part-default-open"
+export { BasicTool } from "./basic-tool"
 
 export function AssistantParts(props: {
   messages: AssistantMessage[]
