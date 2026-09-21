@@ -1,7 +1,5 @@
 import type { Part as PartType, ToolPart } from "@opencode-ai/sdk/v2"
 
-const CONTEXT_GROUP_TOOLS = new Set(["read", "glob", "grep", "list"])
-
 export type PartRef = {
   messageID: string
   partID: string
@@ -15,18 +13,9 @@ export type PartGroup =
     }
   | {
       key: string
-      type: "context"
-      refs: PartRef[]
-    }
-  | {
-      key: string
       type: "edit"
       refs: PartRef[]
     }
-
-export function isContextGroupTool(part: PartType): part is ToolPart {
-  return part.type === "tool" && CONTEXT_GROUP_TOOLS.has(part.tool)
-}
 
 function isEditTool(part: PartType): part is ToolPart {
   return part.type === "tool" && part.tool === "edit"
@@ -86,7 +75,6 @@ export function sameGroups(a: readonly PartGroup[] | undefined, b: readonly Part
 
 export function groupParts(parts: { messageID: string; part: PartType }[]) {
   const result: PartGroup[] = []
-  let contextStart = -1
   let editStart = -1
   let editFile: string | undefined
 
@@ -96,19 +84,6 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
   })
 
   const flush = (end: number) => {
-    if (contextStart >= 0) {
-      const first = parts[contextStart]
-      const last = parts[end]
-      if (first && last) {
-        result.push({
-          key: `context:${first.part.id}`,
-          type: "context",
-          refs: parts.slice(contextStart, end + 1).map(ref),
-        })
-      }
-      contextStart = -1
-    }
-
     if (editStart >= 0) {
       const first = parts[editStart]
       const refs = parts.slice(editStart, end + 1).map(ref)
@@ -133,14 +108,6 @@ export function groupParts(parts: { messageID: string; part: PartType }[]) {
   }
 
   parts.forEach((item, index) => {
-    if (isContextGroupTool(item.part)) {
-      if (contextStart < 0) {
-        flush(index - 1)
-        contextStart = index
-      }
-      return
-    }
-
     if (isEditTool(item.part)) {
       const file = editFilePath(item.part)
       if (editStart < 0) {

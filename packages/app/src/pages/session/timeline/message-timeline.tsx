@@ -20,7 +20,6 @@ import { Accordion } from "@opencode-ai/ui/accordion"
 import { Button } from "@opencode-ai/ui/button"
 import { Card } from "@opencode-ai/ui/card"
 import {
-  ContextToolGroup,
   EditToolGroup,
   Message,
   MessageDivider,
@@ -82,7 +81,6 @@ import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
-const emptyTools: ToolPart[] = []
 const emptyEditItems: EditToolItem[] = []
 const emptyAssistantMessages: AssistantMessage[] = []
 const idle = { type: "idle" as const }
@@ -976,32 +974,6 @@ export function MessageTimeline(props: {
   }
 
   const renderAssistantPartGroup = (row: Accessor<TimelineRowMap["AssistantPart"]>, onSizeChange?: () => void) => {
-    if (row().group.type === "context") {
-      const parts = createMemo(() => {
-        const group = row().group
-        if (group.type !== "context") return emptyTools
-        return group.refs
-          .map((ref) => getMsgPart(ref.messageID, ref.partID))
-          .filter((part): part is ToolPart => part?.type === "tool")
-      })
-      const contextOpenKey = () => `context:${row().group.key}`
-      const open = createMemo(() => {
-        return toolOpen[contextOpenKey()] === true
-      })
-
-      return (
-        <ContextToolGroup
-          parts={parts()}
-          open={open()}
-          onOpenChange={(value) => setToolOpen(contextOpenKey(), value)}
-          busy={
-            workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
-          }
-          onSizeChange={onSizeChange}
-        />
-      )
-    }
-
     if (row().group.type === "edit") {
       const items = createMemo(() => {
         const group = row().group

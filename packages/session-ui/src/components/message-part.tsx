@@ -58,16 +58,8 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
-import { AnimatedCountList } from "./tool-count-summary"
 import { AnimatedCountLabel } from "./tool-count-label"
-import {
-  editFileDiff,
-  editFilePath,
-  groupParts,
-  isContextGroupTool,
-  sameGroups,
-  type PartGroup,
-} from "./message-part-groups"
+import { editFileDiff, editFilePath, groupParts, sameGroups, type PartGroup } from "./message-part-groups"
 import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
 import { partDefaultOpen } from "./part-default-open"
@@ -622,15 +614,8 @@ function list<T>(value: T[] | undefined | null, fallback: T[]) {
   return fallback
 }
 
-function same<T>(a: readonly T[] | undefined, b: readonly T[] | undefined) {
-  if (a === b) return true
-  if (!a || !b) return false
-  if (a.length !== b.length) return false
-  return a.every((x, i) => x === b[i])
-}
-
 export type { PartGroup, PartRef } from "./message-part-groups"
-export { groupParts, isContextGroupTool, sameGroups } from "./message-part-groups"
+export { groupParts, sameGroups } from "./message-part-groups"
 
 function index<T extends { id: string }>(items: readonly T[]) {
   return new Map(items.map((item) => [item.id, item] as const))
@@ -661,7 +646,6 @@ export function AssistantParts(props: {
 }) {
   const data = useData()
   const emptyParts: PartType[] = []
-  const emptyTools: ToolPart[] = []
   const emptyEditItems: EditToolItem[] = []
   const msgs = createMemo(() => index(props.messages))
   const part = createMemo(
@@ -687,8 +671,6 @@ export function AssistantParts(props: {
     { equals: sameGroups },
   )
 
-  const last = createMemo(() => grouped().at(-1)?.key)
-
   return (
     <Index each={grouped()}>
       {(entryAccessor) => {
@@ -696,28 +678,6 @@ export function AssistantParts(props: {
 
         return (
           <Switch>
-            <Match when={entryType() === "context"}>
-              {(() => {
-                const parts = createMemo(
-                  () => {
-                    const entry = entryAccessor()
-                    if (entry.type !== "context") return emptyTools
-                    return entry.refs
-                      .map((ref) => part().get(ref.messageID)?.get(ref.partID))
-                      .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
-                  },
-                  emptyTools,
-                  { equals: same },
-                )
-                const busy = createMemo(() => props.working && last() === entryAccessor().key)
-
-                return (
-                  <Show when={parts().length > 0}>
-                    <ContextToolGroup parts={parts()} busy={busy()} />
-                  </Show>
-                )
-              })()}
-            </Match>
             <Match when={entryType() === "edit"}>
               {(() => {
                 const items = createMemo(
@@ -775,80 +735,6 @@ export function AssistantParts(props: {
       }}
     </Index>
   )
-}
-
-function contextToolDetail(part: ToolPart): string | undefined {
-  const info = getToolInfo(
-    part.tool,
-    part.state.input ?? {},
-    "metadata" in part.state ? part.state.metadata : undefined,
-  )
-  if (info.subtitle) return info.subtitle
-  if (part.state.status === "error") return part.state.error
-  if ((part.state.status === "running" || part.state.status === "completed") && part.state.title)
-    return part.state.title
-  const description = part.state.input?.description
-  if (typeof description === "string") return description
-  return undefined
-}
-
-function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
-  const input = (part.state.input ?? {}) as Record<string, unknown>
-  const path = typeof input.path === "string" ? input.path : "/"
-  const filePath = typeof input.filePath === "string" ? input.filePath : undefined
-  const pattern = typeof input.pattern === "string" ? input.pattern : undefined
-  const include = typeof input.include === "string" ? input.include : undefined
-  const offset = typeof input.offset === "number" ? input.offset : undefined
-  const limit = typeof input.limit === "number" ? input.limit : undefined
-
-  switch (part.tool) {
-    case "read": {
-      const args: string[] = []
-      if (offset !== undefined) args.push("offset=" + offset)
-      if (limit !== undefined) args.push("limit=" + limit)
-      return {
-        title: i18n.t("ui.tool.read"),
-        subtitle: filePath ? getFilename(filePath) : "",
-        args,
-      }
-    }
-    case "list":
-      return {
-        title: i18n.t("ui.tool.list"),
-        subtitle: getDirectory(path),
-      }
-    case "glob":
-      return {
-        title: i18n.t("ui.tool.glob"),
-        subtitle: getDirectory(path),
-        args: pattern ? ["pattern=" + pattern] : [],
-      }
-    case "grep": {
-      const args: string[] = []
-      if (pattern) args.push("pattern=" + pattern)
-      if (include) args.push("include=" + include)
-      return {
-        title: i18n.t("ui.tool.grep"),
-        subtitle: getDirectory(path),
-        args,
-      }
-    }
-    default: {
-      const info = getToolInfo(part.tool, input, "metadata" in part.state ? part.state.metadata : undefined)
-      return {
-        title: info.title,
-        subtitle: info.subtitle || contextToolDetail(part),
-        args: [],
-      }
-    }
-  }
-}
-
-function contextToolSummary(parts: ToolPart[]) {
-  const read = parts.filter((part) => part.tool === "read").length
-  const search = parts.filter((part) => part.tool === "glob" || part.tool === "grep").length
-  const list = parts.filter((part) => part.tool === "list").length
-  return { read, search, list }
 }
 
 function ExaOutput(props: { output?: string }) {
@@ -917,7 +803,6 @@ export function AssistantMessageDisplay(props: {
   showReasoningSummaries?: boolean
   useV2Actions?: boolean
 }) {
-  const emptyTools: ToolPart[] = []
   const emptyEditItems: EditToolItem[] = []
   const part = createMemo(() => index(props.parts))
   const grouped = createMemo(
@@ -941,27 +826,6 @@ export function AssistantMessageDisplay(props: {
 
         return (
           <Switch>
-            <Match when={entryType() === "context"}>
-              {(() => {
-                const parts = createMemo(
-                  () => {
-                    const entry = entryAccessor()
-                    if (entry.type !== "context") return emptyTools
-                    return entry.refs
-                      .map((ref) => part().get(ref.partID))
-                      .filter((part): part is ToolPart => !!part && isContextGroupTool(part))
-                  },
-                  emptyTools,
-                  { equals: same },
-                )
-
-                return (
-                  <Show when={parts().length > 0}>
-                    <ContextToolGroup parts={parts()} />
-                  </Show>
-                )
-              })()}
-            </Match>
             <Match when={entryType() === "edit"}>
               {(() => {
                 const items = createMemo(
@@ -1008,116 +872,6 @@ export function AssistantMessageDisplay(props: {
         )
       }}
     </Index>
-  )
-}
-
-export function ContextToolGroup(props: {
-  parts: ToolPart[]
-  busy?: boolean
-  open?: boolean
-  onOpenChange?: (open: boolean) => void
-  onSizeChange?: () => void
-}) {
-  const i18n = useI18n()
-  const [localOpen, setLocalOpen] = createSignal(false)
-  const open = () => props.open ?? localOpen()
-  const pending = createMemo(
-    () =>
-      !!props.busy || props.parts.some((part) => part.state.status === "pending" || part.state.status === "running"),
-  )
-  const summary = createMemo(() => contextToolSummary(props.parts))
-  const handleOpenChange = (value: boolean) => {
-    if (props.open === undefined) setLocalOpen(value)
-    props.onOpenChange?.(value)
-    props.onSizeChange?.()
-  }
-
-  return (
-    <Collapsible
-      open={open()}
-      onOpenChange={handleOpenChange}
-      variant="ghost"
-      class="tool-collapsible"
-      data-timeline-part-ids={props.parts.map((part) => part.id).join(",")}
-    >
-      <Collapsible.Trigger>
-        <div data-component="context-tool-group-trigger">
-          <span
-            data-slot="context-tool-group-title"
-            class="min-w-0 flex items-center gap-2 text-14-medium text-text-strong"
-          >
-            <span data-slot="context-tool-group-label" class="shrink-0">
-              <ToolStatusTitle
-                active={pending()}
-                activeText={i18n.t("ui.sessionTurn.status.gatheringContext")}
-                doneText={i18n.t("ui.sessionTurn.status.gatheredContext")}
-                split={false}
-              />
-            </span>
-            <span
-              data-slot="context-tool-group-summary"
-              class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-normal text-text-base"
-            >
-              <AnimatedCountList
-                items={[
-                  {
-                    key: "ui.messagePart.context.read",
-                    count: summary().read,
-                  },
-                  {
-                    key: "ui.messagePart.context.search",
-                    count: summary().search,
-                  },
-                  {
-                    key: "ui.messagePart.context.list",
-                    count: summary().list,
-                  },
-                ]}
-                fallback=""
-              />
-            </span>
-          </span>
-          <Collapsible.Arrow />
-        </div>
-      </Collapsible.Trigger>
-      <Collapsible.Content>
-        <div data-component="context-tool-group-list">
-          <Index each={props.parts}>
-            {(partAccessor) => {
-              const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n))
-              const running = createMemo(
-                () => partAccessor().state.status === "pending" || partAccessor().state.status === "running",
-              )
-              return (
-                <div data-slot="context-tool-group-item">
-                  <div data-component="tool-trigger">
-                    <div data-slot="basic-tool-tool-trigger-content">
-                      <div data-slot="basic-tool-tool-info">
-                        <div data-slot="basic-tool-tool-info-structured">
-                          <div data-slot="basic-tool-tool-info-main">
-                            <span data-slot="basic-tool-tool-title">
-                              <TextShimmer text={trigger().title} active={running()} />
-                            </span>
-                            <Show when={trigger().subtitle}>
-                              <span data-slot="basic-tool-tool-subtitle">{trigger().subtitle}</span>
-                            </Show>
-                            <Show when={trigger().args?.length}>
-                              <For each={trigger().args}>
-                                {(arg) => <span data-slot="basic-tool-tool-arg">{arg}</span>}
-                              </For>
-                            </Show>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )
-            }}
-          </Index>
-        </div>
-      </Collapsible.Content>
-    </Collapsible>
   )
 }
 
