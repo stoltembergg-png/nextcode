@@ -1516,6 +1516,19 @@ fn write_debug_zip(
 }
 
 fn main() {
+    // WebKitGTK DMA-BUF + NVIDIA/AppImage EGL aborts the web process and leaves a gray
+    // window (EGL_BAD_PARAMETER). Set before the webview exists so WebKitWebProcess inherits it.
+    // https://v2.tauri.app/develop/debug/linux-graphics/  tauri-apps/tauri#9394
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
+    }
+
     // Surface shell panics in the log file as well: the default hook only writes to stderr, which
     // a packaged Windows build has no console for, so `export_debug_logs` would miss them. Keep the
     // default hook so the message still reaches stderr when a console exists.
