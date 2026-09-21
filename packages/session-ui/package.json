@@ -26,7 +26,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "bun test src --only-failures"
+    "test": "bun test --conditions=browser src --only-failures"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "20.12.0",
