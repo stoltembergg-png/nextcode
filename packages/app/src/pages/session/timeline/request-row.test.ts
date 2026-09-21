@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test"
-import { openRequestKinds, requestRowOffset, requestScrollPadding, timelinePaddingEnd } from "./request-row"
+import {
+  openQuestionPart,
+  openRequestKinds,
+  requestRowOffset,
+  requestScrollPadding,
+  timelinePaddingEnd,
+} from "./request-row"
 
 test("lists an open permission and question once", () => {
   expect(openRequestKinds({ permission: true, question: false })).toEqual(["permission"])
@@ -21,6 +27,24 @@ test("keeps an empty titled timeline request row inside the content box", () => 
   expect(offset).not.toBe(-64)
   expect(offset).toBeGreaterThanOrEqual(0)
   expect(offset).toBe(0)
+})
+
+test("hides only the pending question part that opened the request", () => {
+  const request = { tool: { messageID: "msg_open", callID: "call_open" } }
+  const pending = {
+    tool: "question",
+    messageID: "msg_open",
+    callID: "call_open",
+    state: { status: "pending" },
+  }
+  expect(openQuestionPart(request, pending)).toBe(true)
+  expect(openQuestionPart(request, { ...pending, state: { status: "running" } })).toBe(true)
+  expect(openQuestionPart(request, { ...pending, callID: "call_other" })).toBe(false)
+  expect(openQuestionPart(request, { ...pending, messageID: "msg_other" })).toBe(false)
+  expect(openQuestionPart(request, { ...pending, tool: "bash" })).toBe(false)
+  expect(openQuestionPart(request, { ...pending, state: { status: "completed" } })).toBe(false)
+  expect(openQuestionPart(undefined, pending)).toBe(false)
+  expect(openQuestionPart({}, pending)).toBe(false)
 })
 
 test("places a request row after titled timeline content", () => {

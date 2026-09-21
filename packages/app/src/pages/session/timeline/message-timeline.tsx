@@ -79,7 +79,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { routingStatusLabel } from "./omo-routing-status"
-import { openRequestKinds, requestRowOffset, requestScrollPadding, timelinePaddingEnd } from "./request-row"
+import { openQuestionPart, openRequestKinds, requestRowOffset, requestScrollPadding, timelinePaddingEnd } from "./request-row"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -275,6 +275,10 @@ export function MessageTimeline(props: {
       title: string
       target: string
       body: JSX.Element
+      tool?: {
+        messageID: string
+        callID: string
+      }
     }
   }
 }) {
@@ -1067,13 +1071,7 @@ export function MessageTimeline(props: {
       if (group.type !== "part") return
       const item = getMsgPart(group.ref.messageID, group.ref.partID)
       if (!item) return
-      if (
-        props.requests?.question &&
-        item.type === "tool" &&
-        item.tool === "question" &&
-        (item.state.status === "pending" || item.state.status === "running")
-      )
-        return
+      if (item.type === "tool" && openQuestionPart(props.requests?.question, item)) return
       return item
     })
     const defaultOpen = createMemo(() => {

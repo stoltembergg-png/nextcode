@@ -1617,6 +1617,7 @@ export default function Page() {
       }),
       target: live?.prompt ?? seeded.prompt,
       body: dock.body,
+      tool: request.tool,
     }
   })
 
