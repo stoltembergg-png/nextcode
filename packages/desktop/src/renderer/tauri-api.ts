@@ -15,6 +15,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { relaunch as relaunchApp } from "@tauri-apps/plugin-process"
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater"
 import type { UpdaterState } from "@opencode-ai/app/updater"
+import { runWindowMenuAction } from "./desktop-menu-window"
 
 // The version compiled into this build (CI writes the release tag into the binary),
 // so the UI reports the release it came from rather than the workspace package
@@ -206,7 +207,7 @@ const tauriApi = {
   onZoomFactorChanged: (callback: (factor: number) => void) => subscribe<number>("zoom-factor-changed", callback),
 
   setTitlebar: async () => {},
-  runDesktopMenuAction: async () => {},
+  runDesktopMenuAction: (action: string) => runWindowMenuAction(action, getCurrentWindow()),
   setBackgroundColor: (color: string) => getCurrentWindow().setBackgroundColor(color),
   exportDebugLogs: () => invoke<string>("export_debug_logs", { reveal: true }),
   setForceFocus: async () => {},
