@@ -171,6 +171,7 @@ export interface MessagePartProps {
   onContentRendered?: () => void
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number
+  semifFooter?: string
   useV2Actions?: boolean
 }
 
@@ -1245,6 +1246,7 @@ export function Part(props: MessagePartProps) {
         onContentRendered={props.onContentRendered}
         showAssistantCopyPartID={props.showAssistantCopyPartID}
         turnDurationMs={props.turnDurationMs}
+        semifFooter={props.semifFooter}
         useV2Actions={props.useV2Actions}
       />
     </Show>
@@ -1498,6 +1500,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
       model(),
       duration(),
       interrupted() ? i18n.t("ui.message.interrupted") : "",
+      props.semifFooter ?? "",
     ]
     return items.filter((x) => !!x).join(" \u00B7 ")
   })
