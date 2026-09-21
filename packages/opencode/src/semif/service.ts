@@ -11,7 +11,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { filesystem, httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
-import { Context, Effect, Exit, FileSystem, Layer, Ref, Schema, Scope, Semaphore } from "effect"
+import { Context, Effect, Exit, Fiber, FileSystem, Layer, Ref, Schema, Scope, Semaphore } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
@@ -578,7 +578,12 @@ const layer = Layer.effect(
           }
           return yield* Effect.tryPromise({
             try: () =>
-              SemifScoring.decide({ url: handle.url }, loaded.resolved, request, SemifManifest.profile(entry)),
+              SemifScoring.decide(
+                { url: handle.url, signal: request.signal },
+                loaded.resolved,
+                request,
+                SemifManifest.profile(entry),
+              ),
             catch: (cause) => new SemifServiceError({ reason: errorMessage(cause) }),
           })
         }).pipe(
@@ -591,6 +596,8 @@ const layer = Layer.effect(
         ),
       dispose: () =>
         Effect.gen(function* () {
+          SemifWarmup.reset()
+          yield* Fiber.interrupt(warmupFiber).pipe(Effect.orElseSucceed(() => undefined))
           const current = yield* Ref.get(state)
           if (current.handle) yield* SemifSidecar.dispose(current.handle)
           SemifScoring.clearCaches()
@@ -611,7 +618,7 @@ const layer = Layer.effect(
         result.start().pipe(Effect.asVoid),
       )
     })
-    yield* bootWarmup.pipe(
+    const warmupFiber = yield* bootWarmup.pipe(
       Effect.exit,
       Effect.tap((exit) =>
         Exit.isFailure(exit) ? Effect.logWarning("semif warm-up setup failed", { cause: exit.cause }) : Effect.void,
