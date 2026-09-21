@@ -226,14 +226,16 @@ const layer = Layer.effect(
 
     const dropHandle = (handle: SemifSidecar.Handle) =>
       Effect.gen(function* () {
+        const dropped = yield* Ref.modify(state, (value) => {
+          if (value.handle !== handle) return [false, value] as const
+          return [
+            true,
+            { ...value, status: "offline" as SemifStatus, handle: undefined, error: undefined },
+          ] as const
+        })
+        if (!dropped) return
         yield* SemifSidecar.dispose(handle)
         SemifScoring.clearCaches()
-        yield* Ref.update(state, (value) => ({
-          ...value,
-          status: "offline" as SemifStatus,
-          handle: undefined,
-          error: undefined,
-        }))
       })
 
     const dropHandleIfDead = Effect.gen(function* () {
