@@ -32,7 +32,9 @@ test.describe("regression: session timeline context group resize", () => {
 
     await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
     await expectSessionTitle(page, title)
-    await expectAppVisible(page.locator(`[data-timeline-part-ids="${contextIDs.join(",")}"]`).first())
+    for (const id of contextIDs) {
+      await expectAppVisible(page.locator(`[data-timeline-part-id="${id}"]`))
+    }
     await expectAppVisible(page.locator(`[data-timeline-part-id="${followingTextID}"]`).first())
     await settle(page)
 
@@ -57,15 +59,13 @@ test.describe("regression: session timeline context group resize", () => {
     await expectSessionTitle(page, title)
     const devtools = await page.context().newCDPSession(page)
     await devtools.send("Emulation.setCPUThrottlingRate", { rate: 4 })
-    const context = page.locator(`[data-timeline-part-ids="${contextIDs.join(",")}"]`).first()
+    const context = page.locator(`[data-timeline-part-id="${contextIDs[0]}"]`)
     await expectAppVisible(context)
-    await expect(context.locator('[data-component="tool-status-title"]')).toHaveAttribute("aria-label", "Exploring")
 
-    const contextSelector = `[data-timeline-part-ids="${contextIDs.join(",")}"]`
+    const contextSelector = `[data-timeline-part-id="${contextIDs[0]}"]`
     const regions = defineVisualRegions({
       status: {
-        selector: `${contextSelector} [data-component="tool-status-title"]`,
-        opacitySelectors: ['[data-slot="tool-status-active"]', '[data-slot="tool-status-done"]'],
+        selector: `${contextSelector} [data-slot="basic-tool-tool-title"]`,
       },
       context: { selector: contextSelector, closest: '[data-timeline-row="AssistantPart"]' },
       following: {
@@ -97,13 +97,9 @@ test.describe("regression: session timeline context group resize", () => {
       await page.waitForTimeout(delay)
     }
 
-    await expect(context.locator('[data-component="tool-status-title"]')).toHaveAttribute("aria-label", "Explored")
+    await expect(context.locator('[data-slot="basic-tool-tool-subtitle"]')).toBeVisible()
     await page.waitForTimeout(700)
     const trace = await stopVisualProbe<keyof typeof regions>(page)
-    const labels = trace.samples
-      .map((sample) => sample.regions.status?.label)
-      .filter((value): value is string => !!value)
-      .filter((value, index, all) => value !== all[index - 1])
     const issues = analyzeVisualObservations(
       trace.samples,
       visualPlan(regions, [
@@ -116,7 +112,6 @@ test.describe("regression: session timeline context group resize", () => {
       ]),
     )
 
-    expect(labels).toEqual(["Exploring", "Explored"])
     expect(issues, JSON.stringify(trace.samples, null, 2)).toEqual([])
   })
 })
@@ -152,7 +147,7 @@ async function sampleExpansion(page: Page) {
           expanded: string | null
         }[]
       >((resolve) => {
-        const context = document.querySelector<HTMLElement>(`[data-timeline-part-ids="${contextIDs.join(",")}"]`)
+        const context = document.querySelector<HTMLElement>(`[data-timeline-part-id="${contextIDs[0]}"]`)
         const text = document.querySelector<HTMLElement>(`[data-timeline-part-id="${followingTextID}"]`)
         const scroller = context?.closest<HTMLElement>(".scroll-view__viewport")
         const trigger = context?.querySelector<HTMLElement>('[data-slot="collapsible-trigger"]')
