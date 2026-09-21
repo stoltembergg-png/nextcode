@@ -3,6 +3,11 @@
   "bundle": {
     "targets": ["appimage"],
     "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/opencode/opencode-cli": "binaries/opencode-cli-real"
+        }
+      },
       "deb": {
         "files": {
           "/usr/share/opencode/opencode-cli": "binaries/opencode-cli-real"

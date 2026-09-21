@@ -16,6 +16,7 @@ describe("tauri linux conf", () => {
 
   test("keeps the bun sidecar out of linuxdeploy usr/bin", () => {
     const conf = JSON.parse(readFileSync(join(dir, "tauri.linux.conf.json"), "utf8"))
+    expect(conf.bundle.linux.appimage.files["/usr/share/opencode/opencode-cli"]).toBe("binaries/opencode-cli-real")
     expect(conf.bundle.linux.deb.files["/usr/share/opencode/opencode-cli"]).toBe("binaries/opencode-cli-real")
   })
 })
