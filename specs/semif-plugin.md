@@ -288,10 +288,18 @@ O SemIf deixou de ser plugin externo e passou a ser **recurso nativo do servidor
 - **UI**: a aba lê `GET /semif/status` (polling de 1,5 s só em estados transitórios) e grava o modo no
   **config global** (`config.semif.mode`), não mais no config do projeto.
 
+### Routing (2026-09-21)
+
+`semif.routing`: `off` (default) | `assist` | `shadow` | `route` | `authoritative`.
+Only off/assist/shadow execute. route/authoritative are stored and run as shadow
+(`mode_not_shipped`). SemIf never blocks Session V2. Calibration metrics live in
+`src/semif/calibration.ts` and do not rewrite sidecar probabilities into confidence.
+
 ### Pendências conhecidas
 
 1. **macOS**: validar num smoke real a co-localização/assinatura do launcher + dylibs (hardlink preserva
    a assinatura; o fallback de cópia pode perder xattrs).
 2. **Progresso**: a UI usa polling; um evento de status dedicado (schema + bus) é a evolução natural.
-3. **Roadmap**: GC de `<data>/semif/runtime/<key>` antigos e variantes CUDA/Vulkan opcionais.
+3. **Roadmap**: GC de `<data>/semif/runtime/<key>` antigos. CUDA continua opcional; Vulkan já está no
+   `auto` (Windows/Ubuntu x64). `route` / `authoritative` ainda não guiam o Session V2.
 
