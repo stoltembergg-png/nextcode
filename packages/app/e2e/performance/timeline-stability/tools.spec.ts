@@ -132,18 +132,18 @@ test.describe("timeline tool state stability", () => {
       cpuRate: 4,
     })
     await timeline.send(status("busy"), 100)
-    const groupSelector = `[data-timeline-part-ids="${ids.join(",")}"]`
-    const group = page.locator(groupSelector)
-    await expect(group).toBeVisible()
-    await group.locator('[data-slot="collapsible-trigger"]').click()
-    await expect(group.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
+    const contextID = ids[0]!
+    const contextSelector = `[data-timeline-part-id="${contextID}"]`
+    const read = page.locator(contextSelector)
+    await expect(read).toBeVisible()
+    await read.locator('[data-slot="collapsible-trigger"]').click()
+    await expect(read.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
 
     const regions = defineVisualRegions({
       status: {
-        selector: `${groupSelector} [data-component="tool-status-title"]`,
-        opacitySelectors: ['[data-slot="tool-status-active"]', '[data-slot="tool-status-done"]'],
+        selector: `${contextSelector} [data-slot="basic-tool-tool-title"]`,
       },
-      context: { selector: groupSelector, closest: '[data-timeline-row="AssistantPart"]' },
+      context: { selector: contextSelector, closest: '[data-timeline-row="AssistantPart"]' },
       following: {
         selector: '[data-timeline-part-id="prt_ctx_following"]',
         closest: '[data-timeline-row="AssistantPart"]',
@@ -160,7 +160,7 @@ test.describe("timeline tool state stability", () => {
       110,
     )
     await timeline.send(partUpdated(toolPart(ids[2]!, tools[2]!, "completed", inputs[2]!)), 250)
-    await expect(group.locator('[data-component="tool-status-title"]')).toHaveAttribute("aria-label", "Explored")
+    await expect(read.locator('[data-slot="basic-tool-tool-subtitle"]')).toBeVisible()
     await timeline.send(status("idle"), 700)
     const trace = await stopVisualProbe<keyof typeof regions>(page)
     await reportVisualStability(
@@ -178,14 +178,14 @@ test.describe("timeline tool state stability", () => {
         { type: "flow", regions: ["context", "following"] },
       ]),
     )
-    await expect(group.locator('[data-component="tool-status-title"]')).toHaveAttribute("aria-label", "Explored")
-    await expect(group.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
-    await group.locator('[data-slot="collapsible-trigger"]').click()
-    await expect(group.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
+    await expect(read.locator('[data-slot="basic-tool-tool-subtitle"]')).toBeVisible()
+    await expect(read.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
+    await read.locator('[data-slot="collapsible-trigger"]').click()
+    await expect(read.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
     await timeline.send(partUpdated(textPart("prt_ctx_late_sibling", "Later sibling content")), 200)
-    await expect(group.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
-    await group.locator('[data-slot="collapsible-trigger"]').click()
-    await expect(group.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
+    await expect(read.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "false")
+    await read.locator('[data-slot="collapsible-trigger"]').click()
+    await expect(read.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
   })
 })
 
