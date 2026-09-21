@@ -1527,6 +1527,11 @@ fn main() {
         if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
             std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
         }
+        // linuxdeploy ships an older libwayland than host Mesa; WebKit then aborts with
+        // EGL_BAD_PARAMETER even after DMA-BUF is off. Force X11/XWayland for AppImage.
+        if std::env::var_os("APPIMAGE").is_some() && std::env::var_os("GDK_BACKEND").is_none() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
     }
 
     // Surface shell panics in the log file as well: the default hook only writes to stderr, which
@@ -1756,6 +1761,14 @@ fn main() {
             }
 
             restore_window_state(&handle);
+            #[cfg(target_os = "linux")]
+            log::info!(
+                "[window] linux webkit DMA-BUF={:?} compositing={:?} gdk={:?} appimage={}",
+                std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER"),
+                std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE"),
+                std::env::var_os("GDK_BACKEND"),
+                std::env::var_os("APPIMAGE").is_some()
+            );
 
             // Windows parity with Electron's `titleBarOverlay`: decorum draws the
             // native-style caption controls into `[data-tauri-decorum-tb]`.

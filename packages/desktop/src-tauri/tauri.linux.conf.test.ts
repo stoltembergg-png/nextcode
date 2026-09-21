@@ -24,5 +24,7 @@ describe("tauri linux conf", () => {
     const rust = readFileSync(join(dir, "src/main.rs"), "utf8")
     expect(rust).toContain('std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1")')
     expect(rust).toContain('std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1")')
+    expect(rust).toContain('std::env::var_os("APPIMAGE")')
+    expect(rust).toContain('std::env::set_var("GDK_BACKEND", "x11")')
   })
 })
