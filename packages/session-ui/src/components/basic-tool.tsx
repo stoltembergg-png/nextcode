@@ -3,7 +3,7 @@ import { animate, type AnimationPlaybackControls } from "motion"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { createStore } from "solid-js/store"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
-import type { IconProps } from "@opencode-ai/ui/icon"
+import { Icon, type IconProps } from "@opencode-ai/ui/icon"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 
 export type TriggerTitle = {
@@ -16,7 +16,7 @@ export type TriggerTitle = {
   action?: JSX.Element
 }
 
-const isTriggerTitle = (val: any): val is TriggerTitle => {
+const isTriggerTitle = (val: unknown): val is TriggerTitle => {
   return (
     typeof val === "object" && val !== null && "title" in val && (typeof Node === "undefined" || !(val instanceof Node))
   )
@@ -188,7 +188,13 @@ export function BasicTool(props: BasicToolProps) {
       data-clickable={props.clickable ? "true" : undefined}
       data-hide-details={props.hideDetails ? "true" : undefined}
     >
+      <Show when={hasChildren() && !props.hideDetails && !props.locked && (!pending() || props.allowOpenWhilePending)}>
+        <Collapsible.Arrow />
+      </Show>
       <div data-slot="basic-tool-tool-trigger-content">
+        <span data-slot="basic-tool-tool-icon">
+          <Icon name={props.icon} size="small" />
+        </span>
         <div data-slot="basic-tool-tool-info">
           <Switch>
             <Match when={dynamicTrigger !== undefined}>{dynamicTrigger}</Match>
@@ -248,9 +254,6 @@ export function BasicTool(props: BasicToolProps) {
           </Switch>
         </div>
       </div>
-      <Show when={hasChildren() && !props.hideDetails && !props.locked && (!pending() || props.allowOpenWhilePending)}>
-        <Collapsible.Arrow />
-      </Show>
     </div>
   )
 
