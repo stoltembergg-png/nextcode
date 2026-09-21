@@ -10,6 +10,11 @@ describe("tauri-shell-linux", () => {
     expect(step).toMatch(/NO_STRIP:\s*["']?true["']?/)
   })
 
+  test("prints linuxdeploy stderr on the AppImage build", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the AppImage"))
+    expect(step).toMatch(/tauri build --verbose /)
+  })
+
   test("runs the AppImage smoke on pull requests to dev", () => {
     expect(yaml).toMatch(/pull_request:\s*\n\s*branches:\s*\[[^\]]*dev/)
   })
