@@ -28,7 +28,9 @@ export function evictForInsert(
       }
     }
     if (!victim) break
-    store.get(victim.sessionID)?.delete(victim.messageID)
+    const parts = store.get(victim.sessionID)
+    parts?.delete(victim.messageID)
+    if (parts && parts.size === 0) store.delete(victim.sessionID)
     total -= 1
   }
 }
