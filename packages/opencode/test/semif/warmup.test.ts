@@ -24,6 +24,7 @@ const status = (overrides: Partial<Status>): Status => ({
   port: 8817,
   adopted: false,
   choices: [],
+  routing: { requested: "off", effective: "off" },
   ...overrides,
 })
 

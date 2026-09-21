@@ -61,6 +61,20 @@ export const SemifStatusSchema = Schema.Struct({
   ),
   backendMessage: Schema.optional(Schema.String),
   systemRuntimeMissing: Schema.Boolean,
+  routing: Schema.Struct({
+    requested: ConfigSemifV1.Routing,
+    effective: Schema.Literals(["off", "assist", "shadow"]),
+    fallbackReason: Schema.optional(Schema.Literal("mode_not_shipped")),
+    last: Schema.optional(
+      Schema.Struct({
+        task: Schema.String,
+        chosen: Schema.String,
+        actual: Schema.optional(Schema.String),
+        agree: Schema.optional(Schema.Boolean),
+        at: Schema.Number,
+      }),
+    ),
+  }),
   model: Schema.optional(ModelInfo),
   choices: Schema.Array(ModelChoice),
   modelPath: Schema.optional(Schema.String),

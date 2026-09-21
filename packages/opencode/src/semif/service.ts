@@ -20,7 +20,7 @@ import { amdHipUnsupported, SemifBackend, readGpuInventory, type BackendVariant 
 import { SemifHipRuntime } from "./hip-runtime"
 import { SemifRocmRuntime } from "./rocm-runtime"
 import { SemifVulkanRuntime } from "./vulkan-runtime"
-import { parseSemifOptions, type SemifMode } from "./config"
+import { parseSemifOptions, effectiveRouting, type SemifMode, type Routing, type EffectiveRouting } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
 import { SemifRuntime } from "./runtime"
@@ -60,6 +60,21 @@ export interface Progress {
   readonly total: number | undefined
 }
 
+export interface RoutingLast {
+  readonly task: string
+  readonly chosen: string
+  readonly actual?: string
+  readonly agree?: boolean
+  readonly at: number
+}
+
+export interface RoutingStatus {
+  readonly requested: Routing
+  readonly effective: EffectiveRouting
+  readonly fallbackReason?: "mode_not_shipped"
+  readonly last?: RoutingLast
+}
+
 export interface Status {
   readonly status: SemifStatus
   readonly mode: SemifMode
@@ -70,6 +85,7 @@ export interface Status {
   readonly backendFallbackReason?: SemifBackend.BackendFallbackReason
   readonly backendMessage?: string
   readonly systemRuntimeMissing: boolean
+  readonly routing: RoutingStatus
   readonly model?: Models
   readonly choices: readonly Choice[]
   readonly modelPath?: string
@@ -120,6 +136,7 @@ interface State {
   readonly rocmFetching?: boolean
   readonly vulkanDownloadFailed?: boolean
   readonly vulkanFetching?: boolean
+  readonly last?: RoutingLast
 }
 
 const layer = Layer.effect(
@@ -158,6 +175,7 @@ const layer = Layer.effect(
       const resolved = parseSemifOptions({
         mode: block?.mode,
         backend: block?.backend,
+        routing: block?.routing,
         modelPath: block?.model_path,
         serverPath: block?.server_path,
         port: block?.port,
@@ -244,6 +262,7 @@ const layer = Layer.effect(
       yield* dropHandleIfDead
       const loaded = yield* load
       const current = yield* Ref.get(state)
+      const routing = effectiveRouting(loaded.resolved.routing)
       const base = {
         mode: loaded.resolved.mode,
         download: loaded.download,
@@ -253,6 +272,12 @@ const layer = Layer.effect(
         backendFallbackReason: loaded.backend.fallbackReason,
         backendMessage: loaded.backend.message,
         systemRuntimeMissing: loaded.backend.systemRuntimeMissing,
+        routing: {
+          requested: loaded.resolved.routing,
+          effective: routing.effective,
+          fallbackReason: routing.fallbackReason,
+          last: current.last,
+        },
         host: loaded.resolved.host,
         port: current.handle?.port ?? loaded.resolved.port,
         pid: current.handle?.pid,
