@@ -116,6 +116,9 @@ jobs:
           # `.relr.dyn` (ELF type 0x13). linuxdeploy honors NO_STRIP.
           # See https://github.com/tauri-apps/tauri/issues/14796
           NO_STRIP: "true"
+          # llama-server is an externalBin; linuxdeploy ldd's it and must
+          # resolve libllama-server-impl.so from the staged SemIf resource dir.
+          LD_LIBRARY_PATH: ${{ github.workspace }}/packages/desktop/src-tauri/semif
         # Default log level swallows linuxdeploy stderr (cmd.output when
         # Level::Error). --verbose uses output_ok so a bundler failure is
         # diagnosable. See crates/tauri-bundler/.../linuxdeploy.rs

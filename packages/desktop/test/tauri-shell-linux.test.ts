@@ -15,6 +15,12 @@ describe("tauri-shell-linux", () => {
     expect(step).toMatch(/tauri build --verbose /)
   })
 
+  test("points linuxdeploy at staged llama-server libraries", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the AppImage"))
+    expect(step).toMatch(/LD_LIBRARY_PATH/)
+    expect(step).toContain("src-tauri/semif")
+  })
+
   test("runs the AppImage smoke on pull requests to dev", () => {
     expect(yaml).toMatch(/pull_request:\s*\n\s*branches:\s*\[[^\]]*dev/)
   })

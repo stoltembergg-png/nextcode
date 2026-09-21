@@ -377,6 +377,11 @@ jobs:
             unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_API_KEY_CONTENTS APPLE_SIGNING_IDENTITY
             export APPLE_SIGNING_IDENTITY="-"
           fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # llama-server is an externalBin; linuxdeploy ldd's it and must
+            # resolve libllama-server-impl.so from the staged SemIf resource dir.
+            export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/packages/desktop/src-tauri/semif${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
           bun run tauri build --config src-tauri/tauri.ci.conf.json --bundles "${{ matrix.bundles }}"
 
       # Packaging smoke test for the vendored SemIf runtime. The .app produced by

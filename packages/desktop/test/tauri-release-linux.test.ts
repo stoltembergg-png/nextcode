@@ -25,4 +25,10 @@ describe("tauri-release linux", () => {
     const step = yaml.slice(yaml.indexOf("name: Build the bundle"))
     expect(step).toMatch(/NO_STRIP:\s*["']?true["']?/)
   })
+
+  test("points linuxdeploy at staged llama-server libraries", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the bundle"))
+    expect(step).toMatch(/LD_LIBRARY_PATH/)
+    expect(step).toContain("src-tauri/semif")
+  })
 })
