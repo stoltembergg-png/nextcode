@@ -6,7 +6,7 @@ export type WindowHandle = {
 
 export function runWindowMenuAction(action: string, window: WindowHandle): Promise<void> {
   if (action === "window.minimize") return window.minimize()
-  if (action === "window.maximize") return window.toggleMaximize()
+  if (action === "window.maximize" || action === "window.toggleMaximize") return window.toggleMaximize()
   if (action === "window.close") return window.close()
   return Promise.resolve()
 }

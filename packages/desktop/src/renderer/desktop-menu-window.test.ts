@@ -30,6 +30,11 @@ describe("runWindowMenuAction", () => {
     await runWindowMenuAction("window.maximize", harness.window)
     expect(harness.calls).toEqual(["toggleMaximize"])
   })
+  test("toggles maximize from the desktop menu action id", async () => {
+    const harness = record()
+    await runWindowMenuAction("window.toggleMaximize", harness.window)
+    expect(harness.calls).toEqual(["toggleMaximize"])
+  })
   test("closes", async () => {
     const harness = record()
     await runWindowMenuAction("window.close", harness.window)
