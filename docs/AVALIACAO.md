@@ -11,7 +11,7 @@ Leitura apenas. Nenhum código de runtime foi alterado. Isto não é um audit fo
 
 ## 1. O que o projeto é
 
-NextCode é um **agente de programação com IA no desktop** (Windows x64 + macOS Apple Silicon). A descrição do GitHub é honesta: *"nextcode desktop migration (Electron → Tauri v2) working fork"*. O repo foi criado em 2026-09-17; em dois dias já há releases de `v0.0.1` até `v0.0.7-beta.2`.
+NextCode é um **agente de programação com IA no desktop** (Windows x64 + macOS Apple Silicon + Linux x86_64 AppImage). A descrição do GitHub é honesta: *"nextcode desktop migration (Electron → Tauri v2) working fork"*. O repo foi criado em 2026-09-17; em dois dias já há releases de `v0.0.1` até `v0.0.7-beta.2`.
 
 O produto é um **shell nativo em volta de um motor herdado**. A linhagem é o OpenCode (`anomalyco` / `sst/opencode`): sessões, agentes, ferramentas, PTY, MCP, providers. O NextCode não reescreveu esse motor. O que é *deste* fork:
 
@@ -46,7 +46,7 @@ Monorepo Bun + Turbo. `package.json` raiz ainda se chama `"opencode"`. Pacotes n
 
 A spec (`specs/tauri-migration.md`) é explícita: P0–P4 do *shell* estão feitos; **ainda pendente** o ciclo real install→update→restart, hardening de sidecar órfão no macOS, e **a remoção do Electron**. O README raiz já fala só de Tauri; `packages/desktop/README.md` e `CONTRIBUTING.md` (linhas 76 e 126–138) ainda descrevem Electron. Quem clonar o repo e seguir o CONTRIBUTING sobe o shell errado.
 
-Paridade incompleta no shim (`packages/desktop/src/renderer/tauri-api.ts`): `installCli` devolve `""`, `wslServers` é `undefined`, onboarding/layout-migration sempre `false`, `readClipboardImage` sempre `null`, `runDesktopMenuAction` e `setTitlebar` são no-op, `getPathForFile` devolve `""` (`dragDropEnabled: false` em `tauri.conf.json`). O comentário de cabeçalho do shim ainda diz que pickers/updater/menu são “fases posteriores” — isso já está desatualizado.
+Paridade incompleta no shim (`packages/desktop/src/renderer/tauri-api.ts`): `installCli` devolve `""`, `wslServers` é `undefined`, onboarding/layout-migration sempre `false`, `readClipboardImage` sempre `null`, `setTitlebar` é no-op, `getPathForFile` devolve `""` (`dragDropEnabled: false` em `tauri.conf.json`). O comentário de cabeçalho do shim ainda diz que pickers/updater/menu são “fases posteriores” — isso já está desatualizado.
 
 ---
 
@@ -57,7 +57,6 @@ Paridade incompleta no shim (`packages/desktop/src/renderer/tauri-api.ts`): `ins
 O `README.md` raiz é utilizável: o que é o produto, instaladores, caveat de unsigned, feed de update, como buildar, tabela de pastas. Problemas concretos:
 
 - A seção License diz que “NextCode is based on NextCode” no mesmo URL — auto-referência, sem nomear o OpenCode / anomalyco.
-- Não diz que Linux desktop foi cortado de propósito (só está em `specs/tauri-migration.md`).
 - `CONTRIBUTING.md` pede Bun 1.3+; o README e o `packageManager` pinam `1.3.14`.
 
 ### Docs
@@ -76,15 +75,16 @@ Não havia pasta `docs/` até este arquivo. O que existe é *forte* e está em `
 
 ### CI
 
-Cinco workflows. **Nenhum dispara em `dev` nem em `pull_request`.** Quatro só em `push` para `tauri-shell`:
+Cinco workflows de produto mais o smoke Linux. **Nenhum dispara em `pull_request`.** Windows/macOS shell só em `push` para `tauri-shell`; o Linux smoke também cobre `dev` e este branch:
 
 | Workflow | Trigger | O que faz |
 | --- | --- | --- |
 | `tauri-shell-windows.yml` | `tauri-shell` + paths | Sidecar cross-compile + smoke Windows (~40 s, asserts em log) |
 | `tauri-shell-macos.yml` | `tauri-shell` + paths (sem `packages/opencode/**`) | Idem macOS |
+| `tauri-shell-linux.yml` | `tauri-shell` / `dev` / this branch + paths | Sidecar `opencode-linux-x64` + AppImage extract smoke |
 | `app-tests.yml` | `tauri-shell` | typecheck app/ui/session-ui; `bun test` do **app com `continue-on-error: true`**; 1 spec Playwright de 63 |
 | `codegen-check.yml` | `tauri-shell` | `bun run --cwd packages/client check:generated` |
-| `tauri-release.yml` | tag `v*` / `workflow_dispatch` | Sidecar + mirror llama.cpp + NSIS/dmg + minisign |
+| `tauri-release.yml` | tag `v*` / `workflow_dispatch` | Sidecar + mirror llama.cpp + NSIS/dmg/AppImage + minisign |
 
 `app-tests.yml` usa Bun **1.4.2** de propósito (Solid/ICU); sidecar/release usam **1.3.14**. Dois mundos Bun, documentado no próprio workflow.
 
@@ -242,7 +242,7 @@ O path `D:\Projetos\JevCode\...` sai no mesmo fôlego que o self-test.
 
 Não é elogio genérico — são peças que eu abriria de novo e copiaria.
 
-1. **`specs/tauri-migration.md`** é um documento de engenharia, não um pitch. Tem drivers, non-goals (Linux), porquê vs Electron, o que P0–P4 entregaram, e o que *não* entregaram. A decisão de não redesenhar `app`/`ui`/`session-ui` está justificada pelo `Platform` + `window.api`, e o código confirma.
+1. **`specs/tauri-migration.md`** é um documento de engenharia, não um pitch. Tem drivers, first ship Linux x86_64 AppImage, porquê vs Electron, o que P0–P4 entregaram, e o que *não* entregaram. A decisão de não redesenhar `app`/`ui`/`session-ui` está justificada pelo `Platform` + `window.api`, e o código confirma.
 
 2. **`specs/performance-audit.md` + `specs/stack-evolution.md`** medem em vez de opinar: sidecar 433–458 MB residente, WebView2 ~441 MB, total ~930 MB, `web-dist` 81,9 → 35,0 MB quando os source maps saíram do release, `event` 2,93 GB. O roadmap risca item quando o workflow existe (`tauri-shell-windows.yml`, `codegen-check.yml`). Poucos forks de dois dias têm esse hábito.
 
