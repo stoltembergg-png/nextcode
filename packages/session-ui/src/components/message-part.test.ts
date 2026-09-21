@@ -1,5 +1,26 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
+import type { Part } from "@opencode-ai/sdk/v2"
 import { readPartText } from "./message-part-text"
+
+mock.module("./markdown.worker.ts?worker&url", () => ({ default: "/mock-worker.js" }))
+
+const { renderable } = await import("./message-part")
+
+function reasoningPart(id: string, text: string): Part {
+  return {
+    id,
+    sessionID: "session",
+    messageID: "message",
+    type: "reasoning",
+    text,
+    time: { start: 0 },
+  }
+}
+
+test("renderable reasoning stays a row even when summaries are off", () => {
+  expect(renderable(reasoningPart("prt_1", "need to inspect foo"), false)).toBe(true)
+  expect(renderable(reasoningPart("prt_2", "   "), true)).toBe(false)
+})
 
 describe("readPartText", () => {
   test("returns empty string when accum is undefined and part text is undefined", () => {

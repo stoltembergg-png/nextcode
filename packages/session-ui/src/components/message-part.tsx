@@ -66,6 +66,7 @@ import { summarizeShellCommand } from "./shell-command-summary"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
+import { ThinkingStatus } from "./thinking-status"
 
 async function writeClipboard(text: string): Promise<boolean> {
   const body = typeof document === "undefined" ? undefined : document.body
@@ -593,7 +594,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
     return true
   }
   if (part.type === "text") return !!part.text?.trim()
-  if (part.type === "reasoning") return showReasoningSummaries && !!part.text?.trim()
+  if (part.type === "reasoning") return !!part.text?.trim()
   return !!PART_MAPPING[part.type]
 }
 
@@ -1556,11 +1557,18 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
     () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
   )
   const text = () => readPartText(data.store.part_text_accum_delta, part())
+  const message = () => props.message as AssistantMessage
 
   return (
     <Show when={text()}>
-      <div data-component="reasoning-part" data-timeline-part-id={part().id}>
-        <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+      <div data-timeline-part-id={part().id}>
+        <ThinkingStatus
+          active={streaming()}
+          pendingMessage={message().role === "assistant" ? message() : undefined}
+          parts={[]}
+        >
+          <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
+        </ThinkingStatus>
       </div>
     </Show>
   )

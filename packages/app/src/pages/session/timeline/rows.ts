@@ -190,18 +190,11 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
-      const heading = assistantMessages
-        .flatMap((message) => getMessageParts(message.id))
-        .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
-        .find((value): value is string => !!value)
-
-      rows.push(
-        new TimelineRow.Thinking({
-          userMessageID: userMessage.id,
-          reasoningHeading: heading,
-        }),
-      )
+    const hasReasoning = assistantMessages.some((message) =>
+      getMessageParts(message.id).some((part) => part.type === "reasoning" && !!part.text?.trim()),
+    )
+    if (isActive && status === "busy" && !error && !hasReasoning) {
+      rows.push(new TimelineRow.Thinking({ userMessageID: userMessage.id }))
     }
 
     if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
@@ -229,41 +222,6 @@ export namespace Timeline {
     }
 
     return rows
-  }
-
-  function reasoningHeading(text: string) {
-    const markdown = text.replace(/\r\n?/g, "\n")
-    const html = markdown.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i)
-    if (html?.[1]) {
-      const value = cleanHeading(html[1].replace(/<[^>]+>/g, " "))
-      if (value) return value
-    }
-
-    const atx = markdown.match(/^\s{0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/m)
-    if (atx?.[1]) {
-      const value = cleanHeading(atx[1])
-      if (value) return value
-    }
-
-    const setext = markdown.match(/^([^\n]+)\n(?:=+|-+)\s*$/m)
-    if (setext?.[1]) {
-      const value = cleanHeading(setext[1])
-      if (value) return value
-    }
-
-    const strong = markdown.match(/^\s*(?:\*\*|__)(.+?)(?:\*\*|__)\s*$/m)
-    if (strong?.[1]) {
-      const value = cleanHeading(strong[1])
-      if (value) return value
-    }
-  }
-
-  function cleanHeading(value: string) {
-    return value
-      .replace(/`([^`]+)`/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/[*_~]+/g, "")
-      .trim()
   }
 
   function unwrapErrorMessage(message: string) {

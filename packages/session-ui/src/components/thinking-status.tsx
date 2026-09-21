@@ -1,9 +1,9 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, type JSX } from "solid-js"
 import { type AssistantMessage } from "@opencode-ai/sdk/v2"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
-import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { AnimatedNumber } from "@opencode-ai/ui/animated-number"
 import { AnimatedCountLabel } from "./tool-count-label"
+import { BasicTool } from "./basic-tool"
 
 function tokenTotal(message: AssistantMessage | undefined) {
   if (!message) return 0
@@ -24,6 +24,7 @@ export function ThinkingStatus(props: {
   active: boolean
   pendingMessage: AssistantMessage | undefined
   parts: readonly { type: string; tool?: string }[]
+  children?: JSX.Element
 }) {
   const i18n = useI18n()
   const [tick, setTick] = createSignal(0)
@@ -81,43 +82,51 @@ export function ThinkingStatus(props: {
   const showDecisions = createMemo(() => decisions() > 0)
   const showTokens = createMemo(() => tokensLabel().length > 0)
   const showElapsed = createMemo(() => elapsed() > 0)
+  const title = () =>
+    props.active ? i18n.t("ui.sessionTurn.status.thinking") : i18n.t("ui.sessionTurn.status.thought")
 
   return (
-    <div data-slot="thinking-status" data-active={props.active ? "true" : "false"}>
-      <span data-slot="thinking-status-label">
-        <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} active={props.active} />
-      </span>
-      <Show when={props.active}>
-        <span data-slot="thinking-status-stats" data-active="true">
-          <Show when={showDecisions()}>
-            <span data-slot="thinking-status-stat-decisions" data-active="true">
-              <span data-slot="thinking-status-stat-inner">
-                <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
-              </span>
+    <BasicTool
+      icon="brain"
+      status={props.active ? "running" : "completed"}
+      allowOpenWhilePending
+      animated={props.children !== undefined}
+      trigger={{
+        title: title(),
+        action:
+          showDecisions() || showTokens() || showElapsed() ? (
+            <span data-slot="thinking-status-stats" data-active="true">
+              <Show when={showDecisions()}>
+                <span data-slot="thinking-status-stat-decisions" data-active="true">
+                  <span data-slot="thinking-status-stat-inner">
+                    <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
+                  </span>
+                </span>
+              </Show>
+              <Show when={showDecisions() && showTokens()}>
+                <span data-slot="thinking-status-sep">·</span>
+              </Show>
+              <Show when={showTokens()}>
+                <span data-slot="thinking-status-stat-tokens" data-active="true">
+                  <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
+                </span>
+              </Show>
+              <Show when={showTokens() && showElapsed()}>
+                <span data-slot="thinking-status-sep">·</span>
+              </Show>
+              <Show when={showElapsed()}>
+                <span data-slot="thinking-status-stat-elapsed" data-active="true">
+                  <span data-slot="thinking-status-stat-inner">
+                    <AnimatedNumber value={elapsed()} />
+                    <span data-slot="thinking-status-stat-suffix">s</span>
+                  </span>
+                </span>
+              </Show>
             </span>
-          </Show>
-          <Show when={showDecisions() && showTokens()}>
-            <span data-slot="thinking-status-sep">·</span>
-          </Show>
-          <Show when={showTokens()}>
-            <span data-slot="thinking-status-stat-tokens" data-active="true">
-              <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
-            </span>
-          </Show>
-          <Show when={showTokens() && showElapsed()}>
-            <span data-slot="thinking-status-sep">·</span>
-          </Show>
-          <Show when={showElapsed()}>
-            <span data-slot="thinking-status-stat-elapsed" data-active="true">
-              <span data-slot="thinking-status-stat-inner">
-                <AnimatedNumber value={elapsed()} />
-                <span data-slot="thinking-status-stat-suffix">s</span>
-              </span>
-            </span>
-          </Show>
-        </span>
-      </Show>
-    </div>
+          ) : undefined,
+      }}
+    >
+      {props.children}
+    </BasicTool>
   )
 }
-
