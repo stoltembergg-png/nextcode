@@ -30,6 +30,7 @@ import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
+import { SemifObserve } from "../semif-observe"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
@@ -106,6 +107,8 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const db = (yield* Database.Service).db
+    const observe = yield* SemifObserve.Service
+    const scope = yield* Effect.scope
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
       const session = yield* store.get(sessionID)
@@ -219,8 +222,18 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
-      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
-        return yield* Effect.die(continueAfterCompaction(currentStep))
+      const compacted = yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request })
+      const tokensBefore = SessionCompaction.estimateRequest(request)
+      yield* observe
+        .observeCompact({
+          sessionID: session.id,
+          actual: compacted ? "compact" : "continue",
+          evidence: `session=${session.id}`,
+          tokensBefore,
+          tokensAfterIfCompact: Math.floor(tokensBefore * 0.4),
+        })
+        .pipe(Effect.ignore, Effect.forkIn(scope))
+      if (compacted) return yield* Effect.die(continueAfterCompaction(currentStep))
       const startSnapshot = yield* snapshots.capture()
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
@@ -435,5 +448,6 @@ export const node = makeLocationNode({
     Config.node,
     Snapshot.node,
     Database.node,
+    SemifObserve.node,
   ],
 })

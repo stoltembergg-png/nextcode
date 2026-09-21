@@ -111,6 +111,7 @@ export interface Interface {
   readonly start: () => Effect.Effect<Status, SemifServiceError>
   readonly acquire: () => Effect.Effect<Status, SemifServiceError>
   readonly decide: (request: SemifDecisionRequest) => Effect.Effect<SemifDecision, SemifServiceError>
+  readonly rememberRouting: (last: RoutingLast) => Effect.Effect<void>
   readonly dispose: () => Effect.Effect<void>
 }
 
@@ -619,6 +620,7 @@ const layer = Layer.effect(
             }),
           ),
         ),
+      rememberRouting: (last) => Ref.update(state, (value) => ({ ...value, last })),
       dispose: () =>
         Effect.gen(function* () {
           SemifWarmup.reset()
@@ -667,6 +669,7 @@ export const status = () => runPromise((service) => service.status())
 export const start = () => runPromise((service) => service.start())
 export const acquire = () => runPromise((service) => service.acquire())
 export const decide = (request: SemifDecisionRequest) => runPromise((service) => service.decide(request))
+export const rememberRouting = (last: RoutingLast) => runPromise((service) => service.rememberRouting(last))
 export const dispose = () => runPromise((service) => service.dispose())
 
 export * as SemifService from "./service"
