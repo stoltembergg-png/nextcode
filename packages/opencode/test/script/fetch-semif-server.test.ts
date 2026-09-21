@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  curlDownloadArgs,
   downloadCandidates,
   embeddedLockfile,
   HOST_TARGETS,
@@ -95,6 +96,57 @@ describe("fetch-semif-server", () => {
       "https://mirror/example.zip",
       "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-hip.zip",
       "https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-rocm-10.0-x64.zip",
+    ])
+  })
+
+  test("does not retry the unpublished dest url when it duplicates the published mirror", () => {
+    const lock: Lockfile = { tag: "b11040", targets: {} }
+    const entry: TargetLock = {
+      asset: "llama-b11040-bin-win-vulkan-x64.zip",
+      bytes: 1,
+      sha256: "abc",
+    }
+    const target = "x86_64-pc-windows-msvc-vulkan"
+    const dest =
+      "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-vulkan.zip"
+    expect(publishedMirrorUrl(lock, target, entry)).toBe(dest)
+    expect(downloadCandidates(lock, target, entry, { NEXTCODE_SEMIF_MIRROR: dest })).toEqual([
+      dest,
+      "https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-vulkan-x64.zip",
+    ])
+  })
+
+  test("upstream-only skips dest mirror urls that do not exist yet", () => {
+    const lock: Lockfile = { tag: "b11040", targets: {} }
+    const entry: TargetLock = {
+      asset: "llama-b11040-bin-win-vulkan-x64.zip",
+      bytes: 1,
+      sha256: "abc",
+    }
+    const dest =
+      "https://github.com/stoltembergg-png/nextcode/releases/download/semif-server-b11040/semif-server-b11040-x86_64-pc-windows-msvc-vulkan.zip"
+    expect(
+      downloadCandidates(lock, "x86_64-pc-windows-msvc-vulkan", entry, {
+        NEXTCODE_SEMIF_MIRROR: dest,
+        NEXTCODE_SEMIF_UPSTREAM_ONLY: "1",
+      }),
+    ).toEqual(["https://github.com/ggml-org/llama.cpp/releases/download/b11040/llama-b11040-bin-win-vulkan-x64.zip"])
+  })
+
+  test("curl download forces IPv4, follows redirects, and bounds wall time", () => {
+    expect(curlDownloadArgs("/tmp/llama.zip", "https://example.com/llama.zip")).toEqual([
+      "-fL",
+      "-4",
+      "--retry",
+      "3",
+      "--retry-delay",
+      "2",
+      "--max-time",
+      "300",
+      "--progress-bar",
+      "-o",
+      "/tmp/llama.zip",
+      "https://example.com/llama.zip",
     ])
   })
 })
