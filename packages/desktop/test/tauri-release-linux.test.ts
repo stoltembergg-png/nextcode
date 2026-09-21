@@ -20,4 +20,19 @@ describe("tauri-release linux", () => {
     expect(yaml).toContain("libayatana-appindicator3-dev")
     expect(yaml).toContain("patchelf")
   })
+
+  test("skips linuxdeploy strip on ubuntu-24.04 AppImage", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the bundle"))
+    expect(step).toMatch(/NO_STRIP:\s*["']?true["']?/)
+  })
+
+  test("points linuxdeploy at staged llama-server libraries", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the bundle"))
+    expect(step).toMatch(/LD_LIBRARY_PATH/)
+    expect(step).toContain("src-tauri/semif")
+  })
+
+  test("stages a linux sidecar wrapper instead of the bun ELF", () => {
+    expect(yaml).toContain("stage-opencode-sidecar.ts")
+  })
 })

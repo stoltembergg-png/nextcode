@@ -1,7 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["appimage"]
+    "targets": ["appimage"],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/opencode/opencode-cli": "binaries/opencode-cli-real"
+        }
+      }
+    }
   },
   "app": {
     "windows": [

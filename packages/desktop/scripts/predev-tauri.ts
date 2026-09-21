@@ -8,7 +8,8 @@
 
 import { $ } from "bun"
 import path from "node:path"
-import { copyFileSync, existsSync, mkdirSync } from "node:fs"
+import { existsSync } from "node:fs"
+import { stageOpencodeSidecar } from "./stage-opencode-sidecar"
 
 const desktop = path.resolve(import.meta.dir, "..")
 const repo = path.resolve(desktop, "../..")
@@ -35,10 +36,8 @@ if (!existsSync(source)) {
 }
 
 const destDir = path.join(desktop, "src-tauri/binaries")
-mkdirSync(destDir, { recursive: true })
-const dest = path.join(destDir, `opencode-cli-${host}${exe}`)
-copyFileSync(source, dest)
-console.log(`sidecar staged: ${dest}`)
+const staged = stageOpencodeSidecar({ host, source, destDir })
+console.log(`sidecar staged: ${staged.wrapper}`)
 
 // `externalBin` requires the vendored llama-server to exist before `tauri dev`
 // compiles; the shell resolves it from the bundle via NEXTCODE_SEMIF_SERVER_PATH.

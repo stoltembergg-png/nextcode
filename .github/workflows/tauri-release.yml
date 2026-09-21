@@ -241,31 +241,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          mkdir -p packages/desktop/src-tauri/binaries
-          case "$RUNNER_OS" in
-            Windows)
-              cp packages/opencode/dist/opencode-windows-x64/bin/opencode.exe \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}.exe"
-              ;;
-            macOS)
-              case "$(uname -m)" in
-                arm64) PLATFORM=opencode-darwin-arm64 ;;
-                x86_64) PLATFORM=opencode-darwin-x64 ;;
-                *) echo "unsupported arch"; exit 1 ;;
-              esac
-              cp "packages/opencode/dist/${PLATFORM}/bin/opencode" \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              # Artifact downloads drop the executable bit.
-              chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              ;;
-            Linux)
-              cp packages/opencode/dist/opencode-linux-x64/bin/opencode \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              ;;
-            *) echo "unsupported runner"; exit 1 ;;
-          esac
+          bun packages/desktop/scripts/stage-opencode-sidecar.ts
           ls -l packages/desktop/src-tauri/binaries
 
       - name: Vendor the llama-server runtime
@@ -363,6 +339,10 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/apple-api-key.p8
           APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY_CONTENTS }}
+          # linuxdeploy's bundled strip cannot parse Ubuntu 24.04 glibc/GTK
+          # `.relr.dyn` (ELF type 0x13). Harmless on Windows/macOS.
+          # See https://github.com/tauri-apps/tauri/issues/14796
+          NO_STRIP: "true"
         run: |
           set -euo pipefail
           if [ "${HAS_APPLE:-false}" = "true" ]; then
@@ -372,6 +352,11 @@ jobs:
             # and fails on the missing .p8; drop them and sign ad-hoc instead.
             unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_API_KEY_CONTENTS APPLE_SIGNING_IDENTITY
             export APPLE_SIGNING_IDENTITY="-"
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # llama-server is an externalBin; linuxdeploy ldd's it and must
+            # resolve libllama-server-impl.so from the staged SemIf resource dir.
+            export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/packages/desktop/src-tauri/semif${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           fi
           bun run tauri build --config src-tauri/tauri.ci.conf.json --bundles "${{ matrix.bundles }}"
 
