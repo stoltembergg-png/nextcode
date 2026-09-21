@@ -30,6 +30,7 @@ export type SemifDecisionRequest = {
   state: unknown
   question: string
   options: SemifOption[]
+  signal?: AbortSignal
 }
 
 export type SemifDecision = {

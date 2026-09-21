@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto"
 import path from "node:path"
-import { Effect, FileSystem, Ref, Schedule, Schema, Stream } from "effect"
+import { Effect, Exit, FileSystem, Ref, Schedule, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Flock } from "@opencode-ai/core/util/flock"
 // Importing Global initializes the process-wide Flock root used for cross-process locks.
@@ -218,9 +218,12 @@ export const ensure = Effect.fn("SemifAcquire.ensure")(function* (input: EnsureI
   if (exists) {
     const info = yield* wrap(fs.stat(input.dest))
     if (input.expectedBytes === undefined || Number(info.size) === input.expectedBytes) {
-      return { path: input.dest, bytes: Number(info.size), sha256: input.sha256, acquired: false }
+      const hashed = yield* verify(input.dest, input.sha256).pipe(Effect.exit)
+      if (Exit.isSuccess(hashed)) {
+        return { path: input.dest, bytes: Number(info.size), sha256: input.sha256, acquired: false }
+      }
+      yield* wrap(fs.remove(input.dest, { force: true }))
     }
-    // Wrong size means a half-migrated or stale file; leave policy to decide.
   }
   if (input.policy !== "auto") {
     return yield* new AcquireError({

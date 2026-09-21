@@ -182,4 +182,18 @@ describe("semif service Vulkan fallback state", () => {
     expect(body("ensureHipRuntime")).toContain("amdHipUnsupported(inventory)")
     expect(body("ensureRocmRuntime")).toContain("amdHipUnsupported(inventory)")
   })
+
+  test("dropHandle only clears state when the captured handle is still current", async () => {
+    const source = await Bun.file(path.join(import.meta.dir, "../../src/semif/service.ts")).text()
+    const start = source.indexOf("const dropHandle =")
+    const end = source.indexOf("const dropHandleIfDead")
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const body = source.slice(start, end)
+    expect(body).toContain("Ref.modify")
+    expect(body).toContain("if (value.handle !== handle) return [false, value]")
+    expect(body).toContain("if (!dropped) return")
+    expect(body.indexOf("SemifSidecar.dispose")).toBeGreaterThan(body.indexOf("if (!dropped) return"))
+    expect(body.indexOf("SemifScoring.clearCaches()")).toBeGreaterThan(body.indexOf("if (!dropped) return"))
+  })
 })

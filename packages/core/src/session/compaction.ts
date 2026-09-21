@@ -80,7 +80,8 @@ type Input = {
   readonly request: LLMRequest
 }
 
-const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
+export const estimateRequest = (request: LLMRequest) =>
+  Token.estimate(JSON.stringify({ system: request.system, messages: request.messages, tools: request.tools }))
 
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
@@ -235,7 +236,7 @@ export const make = (dependencies: Dependencies) => {
     if (context === undefined || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
     if (
-      estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=
+      estimateRequest(input.request) <=
       context - Math.max(output, config.buffer)
     )
       return false

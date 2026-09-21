@@ -49,6 +49,22 @@ const config = (port: number) => ({
   modelPath: MODEL_PATH,
 })
 
+test("health is true only for HTTP 200 /health", async () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url)
+      if (url.pathname === "/health") return new Response("ok", { status: 200 })
+      return new Response("no", { status: 404 })
+    },
+  })
+  const url = `http://127.0.0.1:${server.port}`
+  const { health } = await import("../../src/semif/sidecar")
+  const ok = await Effect.runPromise(health(url).pipe(Effect.provide(FetchHttpClient.layer)))
+  expect(ok).toBe(true)
+  server.stop(true)
+})
+
 test("cpu sidecar omits ngl", () => {
   expect(
     sidecarArgs(

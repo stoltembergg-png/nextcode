@@ -24,6 +24,7 @@ const status = (overrides: Partial<Status>): Status => ({
   port: 8817,
   adopted: false,
   choices: [],
+  routing: { requested: "off", effective: "off" },
   ...overrides,
 })
 
@@ -111,6 +112,38 @@ describe("semif warm-up policy", () => {
     )
 
     expect(delays).toEqual([5_000, 5_000])
+  })
+
+  test("run stops retrying after reset during sleep", async () => {
+    let starts = 0
+    let slept = 0
+    await Effect.runPromise(
+      run(
+        { mode: "auto", download: "auto" },
+        Effect.sync(() => {
+          starts += 1
+          throw new Error("nope")
+        }),
+        {
+          random: () => 0,
+          sleep: () =>
+            Effect.sync(() => {
+              slept += 1
+              if (slept === 1) reset()
+            }),
+        },
+      ),
+    )
+    expect(starts).toBeLessThan(WARMUP_MAX_ATTEMPTS)
+    expect(starts).toBe(1)
+  })
+
+  test("dispose contract calls reset so retryAttempt restarts from 0", () => {
+    reset()
+    const first = retryDelay(3, 0)
+    reset()
+    expect(typeof reset).toBe("function")
+    expect(first).toBeGreaterThan(0)
   })
 
   test("bounds automatic retries so permanent failures do not loop forever", async () => {

@@ -20,6 +20,7 @@ import { rootSession } from "@/utils/session-route"
 import { normalizeSessionInfo } from "@/utils/session"
 import { compareMessages, messageKey, normalizeSessionMessages } from "@/utils/session-message"
 import { dropSessionCaches, pickSessionCacheEvictions, SESSION_CACHE_LIMIT } from "./global-sync/session-cache"
+import { evictForInsert, ORPHAN_PART_TTL_MS } from "./orphan-parts"
 import { createV2SessionReducer, type V2SessionReduction } from "./server-session-v2-reducer"
 import type { ServerApi } from "@/utils/server"
 
@@ -30,8 +31,6 @@ const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const initialMessagePageSize = 20
 const historyMessagePageSize = 200
 const sessionInfoLimit = 2_048
-const orphanPartTtlMs = 10 * 60 * 1_000
-const orphanPartLimit = 4_096
 const emptyIDs: ReadonlySet<string> = new Set()
 
 function needsOlderTurnRoot(source: readonly SessionMessageInfo[]) {
@@ -262,11 +261,11 @@ export function createServerSession(
     if (orphanGcTimer !== undefined || orphanPartCount === 0) return
     let next = Number.POSITIVE_INFINITY
     for (const orphans of orphanParts.values()) {
-      for (const created of orphans.values()) next = Math.min(next, created + orphanPartTtlMs)
+      for (const created of orphans.values()) next = Math.min(next, created + ORPHAN_PART_TTL_MS)
     }
     orphanGcTimer = setTimeout(() => {
       orphanGcTimer = undefined
-      const cutoff = Date.now() - orphanPartTtlMs
+      const cutoff = Date.now() - ORPHAN_PART_TTL_MS
       for (const [sessionID, orphans] of orphanParts) {
         deleteOrphanParts(
           sessionID,
@@ -279,24 +278,20 @@ export function createServerSession(
     timer.unref?.()
   }
   const rememberOrphanPart = (sessionID: string, messageID: string) => {
-    const orphans = orphanParts.get(sessionID) ?? new Map<string, number>()
-    if (!orphans.has(messageID)) {
-      if (orphanPartCount >= orphanPartLimit) {
-        let oldest: { sessionID: string; messageID: string; created: number } | undefined
-        for (const [oldSessionID, oldOrphans] of orphanParts) {
-          for (const [oldMessageID, created] of oldOrphans) {
-            if (!oldest || created < oldest.created) oldest = { sessionID: oldSessionID, messageID: oldMessageID, created }
-          }
-        }
-        if (oldest) {
-          setData(produce((draft) => deleteMessageParts(draft, oldest.messageID)))
-          untrackOrphan(oldest.sessionID, [oldest.messageID])
-        }
-      }
-      orphanPartCount += 1
+    const previous = new Map<string, Set<string>>()
+    for (const [id, parts] of orphanParts) {
+      previous.set(id, new Set(parts.keys()))
     }
-    orphans.set(messageID, Date.now())
-    orphanParts.set(sessionID, orphans)
+    evictForInsert(orphanParts, sessionID, messageID, Date.now())
+    orphanPartCount = 0
+    for (const parts of orphanParts.values()) orphanPartCount += parts.size
+    for (const [id, messages] of previous) {
+      const remaining = orphanParts.get(id)
+      for (const oldMessage of messages) {
+        if (remaining?.has(oldMessage)) continue
+        setData(produce((draft) => deleteMessageParts(draft, oldMessage)))
+      }
+    }
     if (orphanGcTimer !== undefined) clearTimeout(orphanGcTimer)
     orphanGcTimer = undefined
     scheduleOrphanGc()

@@ -6,7 +6,7 @@ import path from "node:path"
 import { Layer, Effect } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { download, ensure } from "../../src/semif/acquire"
+import { download, ensure, AcquireError } from "../../src/semif/acquire"
 
 const layer = Layer.mergeAll(NodeFileSystem.layer, FetchHttpClient.layer)
 
@@ -246,6 +246,59 @@ describe("semif acquire", () => {
       expect(await Bun.file(dest).exists()).toBe(false)
     } finally {
       server.stop()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("ensure rehashes an existing dest and rejects a same-size corrupt file", async () => {
+    const dir = await tmpdir()
+    const dest = path.join(dir, "LFM2-350M-Q4_K_M.gguf")
+    const part = path.join(dir, "model.part")
+    const corrupt = new Uint8Array(content.byteLength)
+    corrupt.set(content)
+    corrupt[0] ^= 0xff
+    await Bun.write(dest, corrupt)
+    const server = modelServer()
+    try {
+      const result = await Effect.runPromise(
+        ensure({
+          dest,
+          part,
+          sha256: hash,
+          expectedBytes: content.byteLength,
+          policy: "auto",
+          resolveUrl: () => Effect.succeed(server.urls()),
+        }).pipe(Effect.provide(layer)),
+      )
+      expect(result.sha256).toBe(hash)
+      expect(result.acquired).toBe(true)
+      const disk = createHash("sha256").update(new Uint8Array(await Bun.file(dest).arrayBuffer())).digest("hex")
+      expect(disk).toBe(hash)
+    } finally {
+      server.stop()
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("ensure accepts an existing dest only after sha256 matches", async () => {
+    const dir = await tmpdir()
+    const dest = path.join(dir, "LFM2-350M-Q4_K_M.gguf")
+    const part = path.join(dir, "model.part")
+    await Bun.write(dest, content)
+    try {
+      const result = await Effect.runPromise(
+        ensure({
+          dest,
+          part,
+          sha256: hash,
+          expectedBytes: content.byteLength,
+          policy: "never",
+          resolveUrl: () => Effect.fail(new AcquireError({ reason: "should not download" })),
+        }).pipe(Effect.provide(layer)),
+      )
+      expect(result.acquired).toBe(false)
+      expect(result.sha256).toBe(hash)
+    } finally {
       await fs.rm(dir, { recursive: true, force: true })
     }
   })

@@ -11,7 +11,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { filesystem, httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { makeRuntime } from "@opencode-ai/core/effect/runtime"
-import { Context, Effect, Exit, FileSystem, Layer, Ref, Schema, Scope, Semaphore } from "effect"
+import { Context, Effect, Exit, Fiber, FileSystem, Layer, Ref, Schema, Scope, Semaphore } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpClient } from "effect/unstable/http"
 import { Config } from "@/config/config"
@@ -20,7 +20,7 @@ import { amdHipUnsupported, SemifBackend, readGpuInventory, type BackendVariant 
 import { SemifHipRuntime } from "./hip-runtime"
 import { SemifRocmRuntime } from "./rocm-runtime"
 import { SemifVulkanRuntime } from "./vulkan-runtime"
-import { parseSemifOptions, type SemifMode } from "./config"
+import { parseSemifOptions, effectiveRouting, type SemifMode, type Routing, type EffectiveRouting } from "./config"
 import { SemifManifest } from "./manifest"
 import { SemifPaths } from "./paths"
 import { SemifRuntime } from "./runtime"
@@ -60,6 +60,21 @@ export interface Progress {
   readonly total: number | undefined
 }
 
+export interface RoutingLast {
+  readonly task: string
+  readonly chosen: string
+  readonly actual?: string
+  readonly agree?: boolean
+  readonly at: number
+}
+
+export interface RoutingStatus {
+  readonly requested: Routing
+  readonly effective: EffectiveRouting
+  readonly fallbackReason?: "mode_not_shipped"
+  readonly last?: RoutingLast
+}
+
 export interface Status {
   readonly status: SemifStatus
   readonly mode: SemifMode
@@ -70,6 +85,7 @@ export interface Status {
   readonly backendFallbackReason?: SemifBackend.BackendFallbackReason
   readonly backendMessage?: string
   readonly systemRuntimeMissing: boolean
+  readonly routing: RoutingStatus
   readonly model?: Models
   readonly choices: readonly Choice[]
   readonly modelPath?: string
@@ -95,6 +111,7 @@ export interface Interface {
   readonly start: () => Effect.Effect<Status, SemifServiceError>
   readonly acquire: () => Effect.Effect<Status, SemifServiceError>
   readonly decide: (request: SemifDecisionRequest) => Effect.Effect<SemifDecision, SemifServiceError>
+  readonly rememberRouting: (last: RoutingLast) => Effect.Effect<void>
   readonly dispose: () => Effect.Effect<void>
 }
 
@@ -120,6 +137,7 @@ interface State {
   readonly rocmFetching?: boolean
   readonly vulkanDownloadFailed?: boolean
   readonly vulkanFetching?: boolean
+  readonly last?: RoutingLast
 }
 
 const layer = Layer.effect(
@@ -158,6 +176,7 @@ const layer = Layer.effect(
       const resolved = parseSemifOptions({
         mode: block?.mode,
         backend: block?.backend,
+        routing: block?.routing,
         modelPath: block?.model_path,
         serverPath: block?.server_path,
         port: block?.port,
@@ -205,6 +224,28 @@ const layer = Layer.effect(
       }
     })
 
+    const dropHandle = (handle: SemifSidecar.Handle) =>
+      Effect.gen(function* () {
+        const dropped = yield* Ref.modify(state, (value) => {
+          if (value.handle !== handle) return [false, value] as const
+          return [
+            true,
+            { ...value, status: "offline" as SemifStatus, handle: undefined, error: undefined },
+          ] as const
+        })
+        if (!dropped) return
+        yield* SemifSidecar.dispose(handle)
+        SemifScoring.clearCaches()
+      })
+
+    const dropHandleIfDead = Effect.gen(function* () {
+      const current = yield* Ref.get(state)
+      if (!current.handle) return
+      const alive = yield* provideSidecar(SemifSidecar.health(current.handle.url))
+      if (alive) return
+      yield* dropHandle(current.handle)
+    })
+
     const dropHandleIfStale = Effect.gen(function* () {
       const loaded = yield* load
       const current = yield* Ref.get(state)
@@ -216,20 +257,15 @@ const layer = Layer.effect(
         (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath) ||
         current.handle.nGpuLayers !== expectedNgl
       if (!stale) return
-      yield* SemifSidecar.dispose(current.handle)
-      SemifScoring.clearCaches()
-      yield* Ref.update(state, (value) => ({
-        ...value,
-        status: "offline" as SemifStatus,
-        handle: undefined,
-        error: undefined,
-      }))
+      yield* dropHandle(current.handle)
     })
 
     const snapshot = Effect.gen(function* () {
       yield* dropHandleIfStale
+      yield* dropHandleIfDead
       const loaded = yield* load
       const current = yield* Ref.get(state)
+      const routing = effectiveRouting(loaded.resolved.routing)
       const base = {
         mode: loaded.resolved.mode,
         download: loaded.download,
@@ -239,6 +275,12 @@ const layer = Layer.effect(
         backendFallbackReason: loaded.backend.fallbackReason,
         backendMessage: loaded.backend.message,
         systemRuntimeMissing: loaded.backend.systemRuntimeMissing,
+        routing: {
+          requested: loaded.resolved.routing,
+          effective: routing.effective,
+          fallbackReason: routing.fallbackReason,
+          last: current.last,
+        },
         host: loaded.resolved.host,
         port: current.handle?.port ?? loaded.resolved.port,
         pid: current.handle?.pid,
@@ -462,6 +504,7 @@ const layer = Layer.effect(
       yield* ensureHipRuntime
       const rocm = yield* ensureRocmRuntime
       yield* dropHandleIfStale
+      yield* dropHandleIfDead
       const current = yield* Ref.get(state)
       if (current.handle) return current.handle
       const refreshed = yield* load
@@ -563,7 +606,12 @@ const layer = Layer.effect(
           }
           return yield* Effect.tryPromise({
             try: () =>
-              SemifScoring.decide({ url: handle.url }, loaded.resolved, request, SemifManifest.profile(entry)),
+              SemifScoring.decide(
+                { url: handle.url, signal: request.signal },
+                loaded.resolved,
+                request,
+                SemifManifest.profile(entry),
+              ),
             catch: (cause) => new SemifServiceError({ reason: errorMessage(cause) }),
           })
         }).pipe(
@@ -574,8 +622,11 @@ const layer = Layer.effect(
             }),
           ),
         ),
+      rememberRouting: (last) => Ref.update(state, (value) => ({ ...value, last })),
       dispose: () =>
         Effect.gen(function* () {
+          SemifWarmup.reset()
+          yield* Fiber.interrupt(warmupFiber).pipe(Effect.orElseSucceed(() => undefined))
           const current = yield* Ref.get(state)
           if (current.handle) yield* SemifSidecar.dispose(current.handle)
           SemifScoring.clearCaches()
@@ -596,7 +647,7 @@ const layer = Layer.effect(
         result.start().pipe(Effect.asVoid),
       )
     })
-    yield* bootWarmup.pipe(
+    const warmupFiber = yield* bootWarmup.pipe(
       Effect.exit,
       Effect.tap((exit) =>
         Exit.isFailure(exit) ? Effect.logWarning("semif warm-up setup failed", { cause: exit.cause }) : Effect.void,
@@ -620,6 +671,7 @@ export const status = () => runPromise((service) => service.status())
 export const start = () => runPromise((service) => service.start())
 export const acquire = () => runPromise((service) => service.acquire())
 export const decide = (request: SemifDecisionRequest) => runPromise((service) => service.decide(request))
+export const rememberRouting = (last: RoutingLast) => runPromise((service) => service.rememberRouting(last))
 export const dispose = () => runPromise((service) => service.dispose())
 
 export * as SemifService from "./service"

@@ -35,6 +35,7 @@ import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator
 import { SessionRunner } from "@opencode-ai/core/session/runner"
 import * as SessionRunnerLLM from "@opencode-ai/core/session/runner/llm"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
+import { SemifObserve } from "@opencode-ai/core/session/semif-observe"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -225,6 +226,12 @@ const config = Layer.succeed(
       ]),
   }),
 )
+const throwingObserve = Layer.succeed(
+  SemifObserve.Service,
+  SemifObserve.Service.of({
+    observeCompact: () => Effect.die(new Error("semif observe failed")),
+  }),
+)
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [Snapshot.node, Snapshot.noopLayer],
   [LayerNodePlatform.llmClient, client],
@@ -235,6 +242,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [ReferenceGuidance.node, referenceGuidance],
   [PermissionV2.node, permission],
   [Config.node, config],
+  [SemifObserve.node, throwingObserve],
 ])
 const execution = Layer.effect(
   SessionExecution.Service,
@@ -285,6 +293,7 @@ const it = testEffect(
       [Snapshot.node, Snapshot.noopLayer],
       [SessionExecution.node, execution],
       [Config.node, config],
+      [SemifObserve.node, throwingObserve],
     ],
   ),
 )
@@ -627,6 +636,20 @@ describe("SessionRunnerLLM", () => {
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: message.id, type: "user", text: "Run automatically" },
       ])
+    }),
+  )
+
+  it.effect("still streams when observeCompact fails", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      requests.length = 0
+      responses = undefined
+      response = []
+
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Keep streaming" }) })
+
+      expect(requests).toHaveLength(1)
     }),
   )
 

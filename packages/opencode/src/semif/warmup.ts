@@ -106,6 +106,7 @@ export const run = Effect.fn("SemifWarmup.run")(function* (
     const retryAttempt = resetGeneration === startedAt ? attempt : 0
     if (retryAttempt >= maxAttempts - 1) return
     yield* sleep(retryDelay(retryAttempt, options.random?.()))
+    if (resetGeneration !== startedAt) return
     attempt = resetGeneration === startedAt ? retryAttempt + 1 : 0
   }
 })
