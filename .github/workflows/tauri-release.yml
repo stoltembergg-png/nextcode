@@ -370,6 +370,7 @@ jobs:
           set -euo pipefail
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -name "*.AppImage" -print -quit)
           test -n "$APPIMAGE"
+          APPIMAGE=$(readlink -f "$APPIMAGE")
           bun scripts/unbundle-appimage-wayland.ts "$APPIMAGE"
           if [ "${HAS_UPDATER_KEY:-false}" = "true" ]; then
             rm -f "${APPIMAGE}.sig"

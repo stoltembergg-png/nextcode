@@ -29,11 +29,11 @@ export function removeBundledWayland(root: string): string[] {
 }
 
 if (import.meta.main) {
-  const appimage = process.argv[2]
-  if (!appimage) {
+  if (!process.argv[2]) {
     console.error("usage: bun packages/desktop/scripts/unbundle-appimage-wayland.ts <AppImage>")
     process.exit(1)
   }
+  const appimage = path.resolve(process.argv[2])
   if (!existsSync(appimage)) throw new Error(`missing AppImage: ${appimage}`)
   const work = mkdtempSync(path.join(tmpdir(), "nextcode-appimage-"))
   const root = path.join(work, "squashfs-root")

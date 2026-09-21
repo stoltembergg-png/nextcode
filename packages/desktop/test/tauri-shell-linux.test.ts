@@ -34,4 +34,9 @@ describe("tauri-shell-linux", () => {
     expect(yaml).toContain("libwayland-*.so*")
     expect(yaml).toContain("unsquashfs")
   })
+
+  test("resolves the AppImage to an absolute path before cd extract", () => {
+    const step = yaml.slice(yaml.indexOf("name: Assert the AppImage payload"))
+    expect(step).toContain('APPIMAGE=$(readlink -f "$APPIMAGE")')
+  })
 })
