@@ -9,6 +9,7 @@ const directory = "C:/NextCode/OmoRoutingFeedback"
 const projectID = "proj_omo_routing_feedback"
 const sessionA = { id: "ses_omo_routing_feedback_a", title: "OMO routing feedback A" }
 const sessionB = { id: "ses_omo_routing_feedback_b", title: "OMO routing feedback B" }
+const sessionEvicted = { id: "ses_omo_routing_feedback_evicted", title: "OMO routing feedback evicted" }
 
 type RoutingEnvelope = {
   directory: string
@@ -24,7 +25,16 @@ type StatusEnvelope = {
   payload: {
     id: string
     type: "session.status"
-    properties: { sessionID: string; status: { type: "idle" } }
+    properties: { sessionID: string; status: { type: "busy" | "idle" } }
+  }
+}
+
+type MessageEnvelope = {
+  directory: string
+  payload: {
+    id: string
+    type: "message.updated"
+    properties: { info: Record<string, unknown> }
   }
 }
 
@@ -239,25 +249,71 @@ test("isolates live routing activity to the tab that owns its session", async ({
   await expect(thinking).toHaveText("Specialist specified: Oracle")
 })
 
-test("removes the thinking row when cancellation makes the session idle", async ({ page }) => {
+test("drops routing activity when the session cache evicts an inactive session", async ({ page }) => {
+  const fillers = Array.from({ length: 40 }, (_, index) => ({
+    id: `ses_omo_routing_feedback_cache_${index}`,
+    title: `OMO routing feedback cache ${index}`,
+  }))
+  const sessions = [sessionA, sessionEvicted, ...fillers]
+  const fixture = await setup(
+    page,
+    sessions,
+    Object.fromEntries(sessions.map((item) => [item.id, { type: item.id === sessionA.id ? "busy" : "idle" }])),
+    [sessionA, sessionEvicted],
+  )
+  const thinking = thinkingLabel(page)
+  const href = sessionHref(sessionEvicted.id)
+
+  await fixture.send(
+    routing(
+      sessionEvicted.id,
+      "call_evicted",
+      { phase: "selected", agent: "fixer", source: "semif", background: false, verification: "tests", durationMs: 40 },
+      0,
+    ),
+  )
+  await fillers.reduce(async (previous, item) => {
+    await previous
+    await fixture.send(routing(item.id, `call_${item.id}`, { phase: "analyzing" }, 0))
+  }, Promise.resolve())
+  await fixture.send(status(sessionEvicted.id, "busy"))
+
+  await page.locator(`[data-titlebar-tab-slot]:has(a[href="${href}"])`).click()
+  await expect(page).toHaveURL(new RegExp(`${href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
+  await expect(thinking).toHaveText("Thinking")
+  await expect(thinking).not.toContainText("Specialist")
+})
+
+test("clears the routing label after an assistant aborts", async ({ page }) => {
   const fixture = await setup(page)
   const thinking = thinkingLabel(page)
 
   await fixture.send(routing(sessionA.id, "call_cancelled", { phase: "analyzing" }, 0))
   await expect(thinking).toHaveText("SemIf analyzing")
-  await fixture.send({
-    directory,
-    payload: {
-      id: "evt_omo_routing_feedback_idle",
-      type: "session.status",
-      properties: { sessionID: sessionA.id, status: { type: "idle" } },
-    },
-  })
+  await fixture.send(abortedAssistant(sessionA.id))
+  await expect(thinking).toHaveText("Thinking")
+})
+
+test("removes the thinking row when the session becomes idle", async ({ page }) => {
+  const fixture = await setup(page)
+  const thinking = thinkingLabel(page)
+
+  await fixture.send(routing(sessionA.id, "call_idle", { phase: "analyzing" }, 0))
+  await expect(thinking).toHaveText("SemIf analyzing")
+  await fixture.send(status(sessionA.id, "idle"))
   await expect(thinking).toHaveCount(0)
 })
 
-async function setup(page: Page, sessions = [sessionA]) {
-  const transport = await installSseTransport<RoutingEnvelope | StatusEnvelope>(page, { server, retry: 20 })
+async function setup(
+  page: Page,
+  sessions = [sessionA],
+  sessionStatus = Object.fromEntries(sessions.map((item) => [item.id, { type: "busy" }])),
+  tabs = sessions,
+) {
+  const transport = await installSseTransport<RoutingEnvelope | StatusEnvelope | MessageEnvelope>(page, {
+    server,
+    retry: 20,
+  })
   await mockNextCodeServer(page, {
     directory,
     project: {
@@ -286,11 +342,11 @@ async function setup(page: Page, sessions = [sessionA]) {
       default: { providerID: "opencode", modelID: "omo-routing-feedback" },
     },
     sessions: sessions.map((item) => session(item)),
-    sessionStatus: Object.fromEntries(sessions.map((item) => [item.id, { type: "busy" }])),
+    sessionStatus,
     pageMessages: (sessionID) => ({ items: messages(sessionID) }),
   })
   await page.addInitScript(
-    ({ sessions }) => {
+    ({ directory, server, sessions }) => {
       localStorage.setItem(
         "settings.v3",
         JSON.stringify({ general: { newLayoutDesigns: true, showStatus: true, showSessionProgressBar: true } }),
@@ -307,7 +363,7 @@ async function setup(page: Page, sessions = [sessionA]) {
         JSON.stringify(sessions.map((item: { id: string }) => ({ type: "session", server, sessionId: item.id }))),
       )
     },
-    { sessions },
+    { directory, server, sessions: tabs },
   )
   await page.goto(sessionHref(sessionA.id))
   const connection = await transport.waitForConnection()
@@ -317,9 +373,40 @@ async function setup(page: Page, sessions = [sessionA]) {
   return {
     transport,
     connection,
-    async send(event: RoutingEnvelope | StatusEnvelope, connectionRecord: SseConnectionRecord = connection) {
+    async send(
+      event: RoutingEnvelope | StatusEnvelope | MessageEnvelope,
+      connectionRecord: SseConnectionRecord = connection,
+    ) {
       const acknowledgement = await transport.send(event)
       expect(acknowledgement.connectionID).toBe(connectionRecord.id)
+    },
+  }
+}
+
+function status(sessionID: string, type: "busy" | "idle"): StatusEnvelope {
+  return {
+    directory,
+    payload: {
+      id: `evt_omo_routing_feedback_status_${sessionID}_${type}`,
+      type: "session.status",
+      properties: { sessionID, status: { type } },
+    },
+  }
+}
+
+function abortedAssistant(sessionID: string): MessageEnvelope {
+  const assistant = messages(sessionID)[1]!.info
+  return {
+    directory,
+    payload: {
+      id: `evt_omo_routing_feedback_aborted_${sessionID}`,
+      type: "message.updated",
+      properties: {
+        info: {
+          ...assistant,
+          error: { name: "MessageAbortedError", data: { message: "Stopped" } },
+        },
+      },
     },
   }
 }

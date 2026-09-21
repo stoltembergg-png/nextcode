@@ -133,27 +133,28 @@ automatic synchronization with future OMO Slim releases.
 ## SemIf routing feedback E2E follow-up
 
 Evidence date: 2026-09-21
-Workspace: `C:/Users/Gabriel/.codex/worktrees/semif-feedback/JevCode`
+Workspace: isolated SemIf routing-feedback worktree
 
 The controlled browser story is
 `packages/app/e2e/user-story/omo-routing-feedback.spec.ts`. It covers the live
 SemIf phase sequence, deterministic and explicit labels, stale clear handling,
-competing tool calls, tab/session isolation, idle cancellation cleanup, and
-reconnect cleanup. See [e2e-review.md](e2e-review.md) for the implementation
-review.
+competing tool calls, tab/session isolation, aborted-assistant and idle cleanup,
+cache eviction, and reconnect cleanup. See [e2e-review.md](e2e-review.md) for
+the implementation review.
 
 | Package or surface | Exact command | Result |
 | --- | --- | --- |
-| App E2E types | `packages/app: tsgo -p e2e/tsconfig.json` | Pass. Direct fallback used because the Bun executable is unavailable in this environment. |
-| App routing feedback E2E | `packages/app: bunx playwright test e2e/user-story/omo-routing-feedback.spec.ts --repeat-each=3` | Not run: `bunx` is not installed or on `PATH` in the current Codex PowerShell environment. |
-| Schema focused matrix | `packages/schema: bun test test/omo-routing-event.test.ts test/event-manifest.test.ts; bun typecheck` | Not run: `bun` is unavailable. |
-| Core focused matrix | `packages/core: bun test test/omo.test.ts; bun typecheck` | Not run: `bun` is unavailable. |
-| OpenCode focused matrix | `packages/opencode: bun test test/omo/routing-activity.test.ts test/omo/router.test.ts test/omo/delegate-tool.test.ts; bun typecheck` | Not run: `bun` is unavailable. |
-| Client focused matrix | `packages/client: bun run check:generated; bun typecheck` | Not run: `bun` is unavailable. |
-| SDK focused matrix | `packages/sdk/js: bun typecheck` | Not run: `bun` is unavailable. |
-| Session UI focused matrix | `packages/session-ui: bun test src/components/thinking-status.test.ts; bun typecheck` | Not run: `bun` is unavailable. |
-| UI focused matrix | `packages/ui: bun typecheck` | Not run: `bun` is unavailable. |
-| App focused matrix | `packages/app: bun test --conditions=solid --preload ./happydom.ts ./src/context/server-session.test.ts ./src/context/global-sync/session-cache.test.ts ./src/pages/session/timeline/omo-routing-status.test.ts ./src/pages/session/timeline/rows-current.test.ts ./src/pages/session/timeline/projection.test.ts; bun typecheck; bunx playwright test e2e/user-story/omo-routing-feedback.spec.ts` | Not run: `bun` and `bunx` are unavailable. |
+| App E2E types | `packages/app: bun run typecheck:e2e` | Pass. |
+| App routing feedback E2E | `packages/app: $env:PATH = "$env:USERPROFILE\.bun\bin;$env:PATH"; bun x playwright test e2e/user-story/omo-routing-feedback.spec.ts --repeat-each=3 --reporter=line` | Pass: 27/27 on Chromium, no retries. |
+| Schema focused matrix | `packages/schema: bun test test/omo-routing-event.test.ts test/event-manifest.test.ts; bun typecheck` | Pass: 4 tests and typecheck. |
+| Core focused matrix | `packages/core: bun test test/omo.test.ts; bun typecheck` | Pass: 12 tests and typecheck. |
+| OpenCode focused matrix | `packages/opencode: bun test test/omo/routing-activity.test.ts test/omo/router.test.ts test/omo/delegate-tool.test.ts; bun typecheck` | Tests pass: 42 tests. Typecheck fails on six pre-existing provider diagnostics in `src/provider/provider.ts` and `src/server/routes/instance/httpapi/handlers/provider.ts`. |
+| Client focused matrix | `packages/client: bun run check:generated; bun typecheck` | Pass: generated output clean and typecheck. |
+| SDK focused matrix | `packages/sdk/js: bun typecheck` | Pass. |
+| Session UI focused matrix | `packages/session-ui: bun test src/components/thinking-status.test.ts; bun typecheck` | Pass: 2 tests and typecheck. |
+| UI focused matrix | `packages/ui: bun typecheck` | Pass. |
+| App focused matrix | `packages/app: bun test --conditions=solid --preload ./happydom.ts ./src/context/server-session.test.ts ./src/context/global-sync/session-cache.test.ts ./src/pages/session/timeline/omo-routing-status.test.ts ./src/pages/session/timeline/rows-current.test.ts ./src/pages/session/timeline/projection.test.ts; bun typecheck` | Tests pass: 102 tests. Typecheck fails on five pre-existing `src/context/models.tsx` diagnostics. |
 | Whitespace check | `repository root: git diff --check` | Pass. |
 
-The Bun-enabled verification commands above remain required before merging.
+The two recorded typecheck failures are outside Task 6 and must be resolved or
+accepted as baseline diagnostics before merge.
