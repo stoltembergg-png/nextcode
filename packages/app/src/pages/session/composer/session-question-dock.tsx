@@ -425,6 +425,7 @@ export const SessionQuestionDock: Component<{
   return (
     <div
       data-component="session-question-dock"
+      data-kind="question"
       ref={(el) => (root = el)}
       onKeyDown={nav}
       class="flex min-h-0 flex-col gap-2 overflow-hidden"
