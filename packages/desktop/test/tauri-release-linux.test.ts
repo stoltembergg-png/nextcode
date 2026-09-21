@@ -20,4 +20,9 @@ describe("tauri-release linux", () => {
     expect(yaml).toContain("libayatana-appindicator3-dev")
     expect(yaml).toContain("patchelf")
   })
+
+  test("skips linuxdeploy strip on ubuntu-24.04 AppImage", () => {
+    const step = yaml.slice(yaml.indexOf("name: Build the bundle"))
+    expect(step).toMatch(/NO_STRIP:\s*["']?true["']?/)
+  })
 })

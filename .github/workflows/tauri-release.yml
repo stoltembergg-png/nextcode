@@ -363,6 +363,10 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/apple-api-key.p8
           APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY_CONTENTS }}
+          # linuxdeploy's bundled strip cannot parse Ubuntu 24.04 glibc/GTK
+          # `.relr.dyn` (ELF type 0x13). Harmless on Windows/macOS.
+          # See https://github.com/tauri-apps/tauri/issues/14796
+          NO_STRIP: "true"
         run: |
           set -euo pipefail
           if [ "${HAS_APPLE:-false}" = "true" ]; then

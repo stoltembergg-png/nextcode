@@ -100,6 +100,11 @@ jobs:
 
       - name: Build the AppImage
         working-directory: packages/desktop
+        env:
+          # linuxdeploy's bundled strip cannot parse Ubuntu 24.04 glibc/GTK
+          # `.relr.dyn` (ELF type 0x13). linuxdeploy honors NO_STRIP.
+          # See https://github.com/tauri-apps/tauri/issues/14796
+          NO_STRIP: "true"
         run: bun run tauri build --config src-tauri/tauri.linux.conf.json --bundles appimage
 
       - name: Assert the AppImage payload
