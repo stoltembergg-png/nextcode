@@ -70,6 +70,7 @@ import {
   createSessionComposerRegionController,
   SessionComposerRegion,
 } from "@/pages/session/composer"
+import { ComposerStripBody, composerStrip } from "@/pages/session/composer/session-composer-strip"
 import { createOpenReviewFile, createSessionTabs, createSizing, shouldShowFileTree } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
@@ -2236,7 +2237,39 @@ export default function Page() {
                         setFollowup("paused", id, true)
                       },
                     })
-                    return <PromptInputV2Composer controller={controller} borderUnderlay />
+                    const [stripExpanded, setStripExpanded] = createSignal(false)
+                    const revertItems = rolled()
+                    return (
+                      <PromptInputV2Composer
+                        controller={controller}
+                        borderUnderlay
+                        strip={composerStrip({
+                          todos: composer.todos(),
+                          revertCount: revertItems.length,
+                          expanded: stripExpanded(),
+                          onToggle: () => setStripExpanded((value) => !value),
+                          body: stripExpanded()
+                            ? (
+                                <ComposerStripBody
+                                  todos={composer.todos()}
+                                  revert={
+                                    revertItems.length > 0
+                                      ? {
+                                          items: revertItems,
+                                          restoring: restoring(),
+                                          disabled: reverting(),
+                                          onRestore: restore,
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              )
+                            : undefined,
+                          todoLabel: (done, total) => language.t("session.todo.progress", { done, total }),
+                          revertLabel: (count) => language.plural("session.revertDock.summary", count),
+                        })}
+                      />
+                    )
                   }}
                 </Show>
               }

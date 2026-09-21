@@ -182,3 +182,60 @@ export function SessionRevertDock(props: {
     </Show>
   )
 }
+
+export function SessionRevertList(props: {
+  items: { id: string; text: string }[]
+  restoring?: string
+  disabled?: boolean
+  onRestore: (id: string) => void
+}) {
+  const language = useLanguage()
+  const settings = useSettings()
+
+  return (
+    <Show
+      when={settings.general.newLayoutDesigns()}
+      fallback={
+        <div class="px-3 pb-7 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar">
+          <For each={props.items}>
+            {(item) => (
+              <div class="flex items-center gap-2 min-w-0 py-1">
+                <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  class="shrink-0"
+                  disabled={props.disabled || !!props.restoring}
+                  onClick={() => props.onRestore(item.id)}
+                >
+                  {language.t("session.revertDock.restore")}
+                </Button>
+              </div>
+            )}
+          </For>
+        </div>
+      }
+    >
+      <div class="flex max-h-42 flex-col gap-2 overflow-y-auto px-4 pt-px pb-3 no-scrollbar">
+        <For each={props.items}>
+          {(item) => (
+            <div class="flex h-6 min-w-0 items-center gap-2">
+              <span class="min-w-0 flex-1 truncate text-[13px] font-[400] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
+                {item.text}
+              </span>
+              <ButtonV2
+                size="small"
+                variant="neutral"
+                class="shrink-0"
+                disabled={props.disabled || !!props.restoring}
+                onClick={() => props.onRestore(item.id)}
+              >
+                {language.t("session.revertDock.restore")}
+              </ButtonV2>
+            </div>
+          )}
+        </For>
+      </div>
+    </Show>
+  )
+}

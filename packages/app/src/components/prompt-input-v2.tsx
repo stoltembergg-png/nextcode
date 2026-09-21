@@ -26,7 +26,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
-import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
+import { PromptInputV2, type PromptInputV2Strip, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
   createPromptInputV2Controller,
   createPromptInputV2State,
@@ -37,6 +37,7 @@ export type PromptInputV2ComposerProps = {
   class?: string
   controller: PromptInputV2ComposerController
   borderUnderlay?: boolean
+  strip?: PromptInputV2Strip
 }
 
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "submission">
@@ -55,6 +56,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         controller={props.controller}
         borderUnderlay={props.borderUnderlay}
         class={props.class}
+        strip={props.strip}
         variantControlVisible={!props.controller.model.loading}
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}

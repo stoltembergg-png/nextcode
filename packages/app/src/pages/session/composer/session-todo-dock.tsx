@@ -209,14 +209,14 @@ export function SessionTodoDock(props: {
             opacity: `${Math.max(0, Math.min(1, 1 - hide()))}`,
           }}
         >
-          <TodoList todos={props.todos} />
+          <SessionTodoList todos={props.todos} />
         </div>
       </div>
     </Dynamic>
   )
 }
 
-function TodoList(props: { todos: Todo[] }) {
+export function SessionTodoList(props: { todos: Todo[] }) {
   const [store, setStore] = createStore({
     stuck: false,
   })
