@@ -7,6 +7,7 @@ export type UiI18nKey = keyof typeof en
 export const UI_PLURAL_KEYS = [
   "ui.sessionTurn.diffs.changed",
   "ui.sessionTurn.thinking.decisions",
+  "ui.message.semif.decisions",
   "ui.messagePart.context.read",
   "ui.messagePart.context.search",
   "ui.messagePart.context.list",

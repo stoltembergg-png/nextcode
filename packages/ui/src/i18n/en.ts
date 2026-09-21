@@ -240,6 +240,11 @@ export const dict: Record<string, string> = {
   "ui.message.duration.seconds": "{{count}}s",
   "ui.message.duration.minutesSeconds": "{{minutes}}m {{seconds}}s",
   "ui.message.interrupted": "Interrupted",
+  "ui.message.semif.none": "No Semif",
+  "ui.message.semif.routed": "Semif",
+  "ui.message.semif.tokens": "{{tokens}} tokens",
+  "ui.message.semif.decisions.one": "{{count}} decision",
+  "ui.message.semif.decisions.other": "{{count}} decisions",
   "ui.message.queued": "Queued",
   "ui.message.attachment.alt": "attachment",
 
