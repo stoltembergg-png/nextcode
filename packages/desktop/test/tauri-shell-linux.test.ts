@@ -28,4 +28,10 @@ describe("tauri-shell-linux", () => {
   test("stages a linux sidecar wrapper instead of the bun ELF", () => {
     expect(yaml).toContain("stage-opencode-sidecar.ts")
   })
+
+  test("strips bundled libwayland from the AppImage before the payload assert", () => {
+    expect(yaml).toContain("unbundle-appimage-wayland.ts")
+    expect(yaml).toContain("libwayland-*.so*")
+    expect(yaml).toContain("unsquashfs")
+  })
 })
