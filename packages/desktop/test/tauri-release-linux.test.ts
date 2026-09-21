@@ -31,4 +31,8 @@ describe("tauri-release linux", () => {
     expect(step).toMatch(/LD_LIBRARY_PATH/)
     expect(step).toContain("src-tauri/semif")
   })
+
+  test("stages a linux sidecar wrapper instead of the bun ELF", () => {
+    expect(yaml).toContain("stage-opencode-sidecar.ts")
+  })
 })

@@ -24,4 +24,8 @@ describe("tauri-shell-linux", () => {
   test("runs the AppImage smoke on pull requests to dev", () => {
     expect(yaml).toMatch(/pull_request:\s*\n\s*branches:\s*\[[^\]]*dev/)
   })
+
+  test("stages a linux sidecar wrapper instead of the bun ELF", () => {
+    expect(yaml).toContain("stage-opencode-sidecar.ts")
+  })
 })

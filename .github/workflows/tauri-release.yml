@@ -241,31 +241,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          mkdir -p packages/desktop/src-tauri/binaries
-          case "$RUNNER_OS" in
-            Windows)
-              cp packages/opencode/dist/opencode-windows-x64/bin/opencode.exe \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}.exe"
-              ;;
-            macOS)
-              case "$(uname -m)" in
-                arm64) PLATFORM=opencode-darwin-arm64 ;;
-                x86_64) PLATFORM=opencode-darwin-x64 ;;
-                *) echo "unsupported arch"; exit 1 ;;
-              esac
-              cp "packages/opencode/dist/${PLATFORM}/bin/opencode" \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              # Artifact downloads drop the executable bit.
-              chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              ;;
-            Linux)
-              cp packages/opencode/dist/opencode-linux-x64/bin/opencode \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              ;;
-            *) echo "unsupported runner"; exit 1 ;;
-          esac
+          bun packages/desktop/scripts/stage-opencode-sidecar.ts
           ls -l packages/desktop/src-tauri/binaries
 
       - name: Vendor the llama-server runtime

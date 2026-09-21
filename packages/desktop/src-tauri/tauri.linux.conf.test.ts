@@ -13,4 +13,9 @@ describe("tauri linux conf", () => {
     expect(conf.app.windows[0].width).toBe(1200)
     expect(conf.app.windows[0].minWidth).toBe(800)
   })
+
+  test("keeps the bun sidecar out of linuxdeploy usr/bin", () => {
+    const conf = JSON.parse(readFileSync(join(dir, "tauri.linux.conf.json"), "utf8"))
+    expect(conf.bundle.linux.deb.files["/usr/share/opencode/opencode-cli"]).toBe("binaries/opencode-cli-real")
+  })
 })

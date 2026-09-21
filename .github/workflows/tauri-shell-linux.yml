@@ -92,11 +92,7 @@ jobs:
       - name: Stage the sidecar for externalBin
         run: |
           set -euo pipefail
-          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          mkdir -p packages/desktop/src-tauri/binaries
-          cp packages/opencode/dist/opencode-linux-x64/bin/opencode \
-             "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-          chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
+          bun packages/desktop/scripts/stage-opencode-sidecar.ts
           ls -l packages/desktop/src-tauri/binaries
 
       - name: Vendor the llama-server runtime
@@ -158,9 +154,14 @@ jobs:
           fi
           test -x "$DESKTOP_BIN"
 
-          CLI=$(find squashfs-root -type f -name "opencode-cli-*" | head -1)
+          CLI=$(find squashfs-root -type f \( -name "opencode-cli" -o -name "opencode-cli-*" \) | head -1)
           if [ -z "$CLI" ]; then
             echo "FAIL: opencode-cli-* missing from extracted AppImage"
+            exit 1
+          fi
+          REAL=$(find squashfs-root -path "*/share/opencode/opencode-cli" | head -1)
+          if [ -z "$REAL" ]; then
+            echo "FAIL: bun sidecar missing from usr/share/opencode"
             exit 1
           fi
 
