@@ -225,6 +225,49 @@ describe("server session", () => {
     expect(store.data.omo_routing_activity.child?.["assistant\0call"]).toBeUndefined()
   })
 
+  test("clears routing activity when a refresh hydrates a settled assistant", async () => {
+    const user = userMessage("message-1", { sessionID: "root" })
+    const pending = assistantMessage("message-2", user.id, {
+      sessionID: "root",
+      time: { created: 2, completed: undefined },
+    })
+    const completed = assistantMessage("message-2", user.id, {
+      sessionID: "root",
+      time: { created: 2, completed: 40 },
+    })
+    const client = messageClient(
+      response([
+        { info: user, parts: [] },
+        { info: pending, parts: [] },
+      ]),
+      response([
+        { info: user, parts: [] },
+        { info: completed, parts: [] },
+      ]),
+    )
+    const store = createServerSession(client, {
+      protocol: Promise.resolve("v1"),
+    })
+    store.remember(session("root"))
+
+    await store.sync("root")
+    store.apply(
+      routing({
+        sessionID: "root",
+        assistantMessageID: pending.id,
+        toolCallID: "call",
+        sequence: 0,
+        state: { phase: "analyzing" },
+      }),
+    )
+    expect(store.data.omo_routing_activity.root?.[`${pending.id}\0call`]).toBeDefined()
+
+    await store.sync("root", { force: true })
+
+    expect(store.data.omo_routing_activity.root?.[`${pending.id}\0call`]).toBeUndefined()
+    expect(store.data.omo_routing_watermark.root?.[`${pending.id}\0call`]).toBeUndefined()
+  })
+
   test("clears routing activity when sessions settle, reconnect, or are evicted", () => {
     const store = setup({ child: session("child") }).store
     store.remember(session("child"))
@@ -242,6 +285,10 @@ describe("server session", () => {
 
     activity()
     store.apply({ type: "server.connected" })
+    expect(store.data.omo_routing_activity.child).toBeUndefined()
+
+    activity()
+    store.apply({ type: "server.disconnected" })
     expect(store.data.omo_routing_activity.child).toBeUndefined()
 
     activity()

@@ -10,7 +10,6 @@ function tokenTotal(message: AssistantMessage | undefined) {
   const t = message.tokens
   return t.input + t.output + t.reasoning + t.cache.read + t.cache.write
 }
-
 function compactNumber(value: number, locale: string) {
   if (value < 1000) return Math.round(value).toString()
   const formatter = new Intl.NumberFormat(locale, {

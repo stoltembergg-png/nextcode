@@ -637,10 +637,14 @@ export function createServerSession(
     }
   }
 
-  const replaceMessages = (sessionID: string, messages: Message[]) => {
+  const replaceMessages = (sessionID: string, messages: Message[], settledMessages: Message[] = messages) => {
     const messageIDs = new Set(messages.map((message) => message.id))
     const dropped = (data.message[sessionID] ?? []).filter((message) => !messageIDs.has(message.id))
     setData("message", sessionID, reconcile(messages, { key: "id" }))
+    settledMessages.forEach((message) => {
+      if (message.role === "assistant" && (message.time.completed !== undefined || message.error !== undefined))
+        clearRoutingMessage(sessionID, message.id)
+    })
     setData(
       produce((draft) => {
         for (const message of dropped) deleteMessageParts(draft, message.id)
@@ -748,7 +752,7 @@ export function createServerSession(
     })
     batch(() => {
       if (source) setData("session_message", sessionID, reconcile(source))
-      const messageIDs = replaceMessages(sessionID, messages)
+      const messageIDs = replaceMessages(sessionID, messages, merged.session)
       replaceParts(sessionID, merged.part, messageIDs, load)
       const orphans = orphanParts.get(sessionID)
       if (cleanupOrphans && page.complete && orphans) {
@@ -1033,6 +1037,7 @@ export function createServerSession(
     }
     switch (event.type) {
       case "server.connected":
+      case "server.disconnected":
         clearRoutingActivity()
         return
       case "session.created":

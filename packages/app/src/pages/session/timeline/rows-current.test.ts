@@ -133,6 +133,53 @@ describe("current session timeline rows", () => {
     expect(thinking?.routingActivity?.toolCallID).toBe("call_current")
   })
 
+  test("keeps routing feedback visible beside a running tool when reasoning summaries are enabled", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "delegate", time: { created: 1_000 } },
+      {
+        id: "msg_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [
+          {
+            type: "tool",
+            id: "call_delegate",
+            name: "omo_delegate",
+            state: { status: "running", input: {}, metadata: {} },
+            time: { created: 1_100 },
+          },
+        ],
+        time: { created: 1_100 },
+      },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        {
+          sessionID: "ses_1",
+          assistantMessageID: "msg_assistant",
+          toolCallID: "call_delegate",
+          sequence: 0,
+          startedAt: 1_100,
+          updatedAt: 1_100,
+          state: { phase: "analyzing" },
+        } as unknown as OmoRoutingEvent.OmoRoutingActivity,
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_delegate")
+  })
+
   test("derives turns and tagged rows from chronological current messages", () => {
     const source = [
       { id: "msg_1", type: "user", text: "first", time: { created: 1 } },

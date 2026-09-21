@@ -194,7 +194,13 @@ export namespace Timeline {
       assistantGroupIndex += 1
     })
 
-    if (isActive && status === "busy" && !error && (showReasoning ? assistantPartRefs.length === 0 : true)) {
+    const routingActivity = latestRoutingActivity(routingActivities, userMessage, assistantMessages)
+    if (
+      isActive &&
+      status === "busy" &&
+      !error &&
+      (showReasoning ? assistantPartRefs.length === 0 || routingActivity !== undefined : true)
+    ) {
       const heading = assistantMessages
         .flatMap((message) => getMessageParts(message.id))
         .map((part) => (part.type === "reasoning" && part.text ? reasoningHeading(part.text) : undefined))
@@ -204,7 +210,7 @@ export namespace Timeline {
         new TimelineRow.Thinking({
           userMessageID: userMessage.id,
           reasoningHeading: heading,
-          routingActivity: latestRoutingActivity(routingActivities, userMessage, assistantMessages),
+          routingActivity,
         }),
       )
     }
