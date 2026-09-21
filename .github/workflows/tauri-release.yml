@@ -473,7 +473,7 @@ jobs:
             Windows) PLATFORM_KEY="windows-x86_64"; ARTIFACT=$(basename "$(ls "$OUT"/*setup.exe)") ;;
             # The macOS updater consumes the .app.tar.gz (the .dmg is for manual installs).
             macOS) PLATFORM_KEY="darwin-aarch64"; ARTIFACT=$(basename "$(ls "$OUT"/*.app.tar.gz)") ;;
-            Linux) PLATFORM_KEY="linux-x86_64"; ARTIFACT=$(basename "$(ls "$OUT"/*.AppImage")") ;;
+            Linux) PLATFORM_KEY="linux-x86_64"; ARTIFACT=$(basename "$(ls "$OUT"/*.AppImage)") ;;
           esac
           if [ -f "$OUT/${ARTIFACT}.sig" ]; then
             export VERSION PLATFORM_KEY

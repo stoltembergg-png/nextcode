@@ -35,4 +35,10 @@ describe("tauri-release linux", () => {
   test("stages a linux sidecar wrapper instead of the bun ELF", () => {
     expect(yaml).toContain("stage-opencode-sidecar.ts")
   })
+
+  test("collects the AppImage with the same quoting as the other platforms", () => {
+    const step = yaml.slice(yaml.indexOf("name: Collect artifacts"))
+    expect(step).toContain('ARTIFACT=$(basename "$(ls "$OUT"/*.AppImage)")')
+    expect(step).not.toContain('*.AppImage")')
+  })
 })
