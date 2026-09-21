@@ -33,6 +33,13 @@ export type {
 
 export type PromptInputV2Mode = "normal" | "shell"
 
+export type PromptInputV2Strip = {
+  label: string
+  expanded: boolean
+  onToggle: () => void
+  body?: JSX.Element
+}
+
 export type PromptInputV2Props = {
   controller: PromptInputV2Interaction
   disabled?: boolean
@@ -43,6 +50,7 @@ export type PromptInputV2Props = {
   variantControlVisible?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
+  strip?: PromptInputV2Strip
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
@@ -127,6 +135,22 @@ export function PromptInputV2(props: PromptInputV2Props) {
           <div class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-v2-background-bg-base/90 text-v2-text-text-base">
             {i18n.t("ui.promptInput.dropFiles")}
           </div>
+        </Show>
+
+        <Show when={props.strip}>
+          {(strip) => (
+            <div data-slot="prompt-strip">
+              <button
+                type="button"
+                data-slot="prompt-strip-toggle"
+                class="w-full px-4 text-start text-[12px] text-v2-text-text-muted"
+                onClick={() => strip().onToggle()}
+              >
+                {strip().label}
+              </button>
+              <Show when={strip().expanded}>{strip().body}</Show>
+            </div>
+          )}
         </Show>
 
         <Show when={state.mode === "normal"}>

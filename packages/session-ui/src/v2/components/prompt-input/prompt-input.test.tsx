@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, test } from "bun:test"
 import { render } from "solid-js/web"
 import { I18nProvider, type UiI18n } from "@opencode-ai/ui/context/i18n"
 import { dict as en } from "@opencode-ai/ui/i18n/en"
@@ -27,6 +27,12 @@ mock.module("@opencode-ai/ui/v2/menu-v2", async () => {
 })
 
 const { PromptInputV2 } = await import("./index")
+import type { PromptInputV2Props } from "./index"
+
+const cleanups: Array<() => void> = []
+afterEach(() => {
+  cleanups.splice(0).forEach((cleanup) => cleanup())
+})
 
 const i18n: UiI18n = {
   locale: () => "en",
@@ -34,7 +40,7 @@ const i18n: UiI18n = {
   plural: (key, count) => (en[`${key}.other`] ?? key).replaceAll("{{count}}", String(count)),
 }
 
-function renderPrompt() {
+function renderPrompt(props?: Pick<PromptInputV2Props, "strip">) {
   const host = document.createElement("div")
   document.body.appendChild(host)
   const noop = () => {}
@@ -81,23 +87,38 @@ function renderPrompt() {
   const dispose = render(
     () => (
       <I18nProvider value={i18n}>
-        <PromptInputV2 controller={controller} />
+        <PromptInputV2 controller={controller} strip={props?.strip} />
       </I18nProvider>
     ),
     host,
   )
-  return { host, dispose }
+  cleanups.push(() => {
+    dispose()
+    host.remove()
+  })
+  return host
 }
 
 describe("PromptInputV2", () => {
   test("composer card is compact and send uses IconButtonV2", () => {
-    const { host: root, dispose } = renderPrompt()
+    const root = renderPrompt()
     const form = root.querySelector("[data-component='prompt-input-v2']")
     expect(form?.className).not.toContain("min-h-[96px]")
     const toolbar = form?.querySelector("[data-slot='prompt-toolbar']")
     expect(toolbar?.className).not.toContain("h-11")
     expect(root.querySelector("[data-action='prompt-submit']")?.getAttribute("data-component")).toBe("icon-button-v2")
-    dispose()
-    root.remove()
+  })
+
+  test("strip is absent when omitted", () => {
+    const root = renderPrompt()
+    expect(root.querySelector("[data-slot='prompt-strip']")).toBeNull()
+  })
+
+  test("strip shows the label and hides the body until expanded", () => {
+    const root = renderPrompt({
+      strip: { label: "1 of 3 todos completed", expanded: false, onToggle() {}, body: <div data-slot="strip-body" /> },
+    })
+    expect(root.querySelector("[data-slot='prompt-strip']")?.textContent).toContain("1 of 3 todos completed")
+    expect(root.querySelector("[data-slot='strip-body']")).toBeNull()
   })
 })
