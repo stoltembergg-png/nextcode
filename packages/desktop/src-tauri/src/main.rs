@@ -216,13 +216,46 @@ fn semif_sidecar_env(app: &AppHandle) -> Option<Vec<(&'static str, String)>> {
     ])
 }
 
+/// Explicitly forwards the bounded set of smoke/runtime variables used by the
+/// packaged OMO contract. Tauri's shell command normally inherits the process
+/// environment, but keeping this list explicit prevents a future command
+/// builder or platform backend from silently dropping the isolated config.
+fn smoke_sidecar_env() -> Vec<(&'static str, String)> {
+    [
+        "NEXTCODE_SMOKE_CONFIG_DIR",
+        "OPENCODE_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "OPENCODE_DISABLE_MODELS_FETCH",
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_DB",
+        "OPENCODE_PURE",
+        "SEMIF_MODE",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()).map(|value| (key, value)))
+    .collect()
+}
+
 /// Spawns the bundled opencode server as a sidecar and waits until it is healthy.
 /// Runs on a dedicated thread so the window can paint the loading state immediately.
 fn start_sidecar(app: &AppHandle) {
+    // CI smoke tests opt into stable credentials so the runner can authenticate
+    // against the dynamically allocated endpoint. Local runs keep a random
+    // password unless both values are explicitly provided.
+    let credentials = match (
+        std::env::var("NEXTCODE_SMOKE_USERNAME"),
+        std::env::var("NEXTCODE_SMOKE_PASSWORD"),
+    ) {
+        (Ok(username), Ok(password)) if !username.is_empty() && !password.is_empty() => (username, password),
+        _ => ("opencode".to_string(), uuid::Uuid::new_v4().to_string()),
+    };
     let endpoint = Endpoint {
         port: 0,
-        username: "opencode".to_string(),
-        password: uuid::Uuid::new_v4().to_string(),
+        username: credentials.0,
+        password: credentials.1,
     };
     let port = match free_port() {
         Ok(port) => port,
@@ -261,9 +294,14 @@ fn spawn_sidecar(app: &AppHandle, endpoint: Endpoint, attempt: u32) {
                 ])
                 .env("OPENCODE_SERVER_USERNAME", endpoint.username.clone())
                 .env("OPENCODE_SERVER_PASSWORD", endpoint.password.clone());
+            let command = smoke_sidecar_env()
+                .into_iter()
+                .fold(command, |command, (key, value)| command.env(key, value));
             let command = match &state_dir {
-                Some(dir) => command.env("XDG_STATE_HOME", dir.to_string_lossy().to_string()),
-                None => command,
+                Some(dir) if std::env::var_os("XDG_STATE_HOME").is_none() => {
+                    command.env("XDG_STATE_HOME", dir.to_string_lossy().to_string())
+                }
+                _ => command,
             };
             let command = match semif_sidecar_env(app) {
                 Some(env) => env.into_iter().fold(command, |command, (key, value)| command.env(key, value)),

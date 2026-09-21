@@ -1,5 +1,6 @@
 import type { SnapshotFileDiff } from "@opencode-ai/sdk/v2"
 import type { PartGroup } from "@opencode-ai/session-ui/message-part"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import { Data, Equal } from "effect"
 
 export type SummaryDiff = SnapshotFileDiff & { file: string }
@@ -27,6 +28,7 @@ export namespace TimelineRow {
   export class Thinking extends Data.TaggedClass("Thinking")<{
     userMessageID: string
     reasoningHeading?: string
+    routingActivity?: OmoRoutingEvent.OmoRoutingActivity
   }> {}
   export class DiffSummary extends Data.TaggedClass("DiffSummary")<{
     userMessageID: string

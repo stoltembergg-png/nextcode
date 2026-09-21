@@ -18,7 +18,13 @@ const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
 
 const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(error) || signal?.aborted === true
-export type ServerEvent = Event & { current?: OpenCodeEvent }
+type ServerDisconnectedEvent = {
+  id: "server.disconnected"
+  type: "server.disconnected"
+  properties: Record<string, never>
+  current?: undefined
+}
+export type ServerEvent = (Event & { current?: OpenCodeEvent }) | ServerDisconnectedEvent
 type QueuedServerEvent = { directory: string; payload: ServerEvent }
 type CurrentDelta = Extract<
   OpenCodeEvent,
@@ -305,6 +311,12 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
+        const disconnected: ServerEvent = {
+          id: "server.disconnected",
+          type: "server.disconnected",
+          properties: {},
+        }
+        if (enqueueServerEvent(queue, { directory: "global", payload: disconnected })) schedule()
         await wait(RECONNECT_DELAY_MS)
       }
     })().finally(() => {
@@ -407,7 +419,7 @@ export function useServerProtocol() {
 
 type SDKEventMap = {
   [key in Event["type"]]: Extract<ServerEvent, { type: key }>
-}
+} & { "server.disconnected": ServerDisconnectedEvent }
 
 function createDirSdkContext(directory: string, serverSDK: ServerSDKBase) {
   const client = serverSDK.createClient({

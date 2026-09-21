@@ -4,6 +4,7 @@ import type {
   Path,
   Project,
   ProviderAuthResponse,
+  OmoStatus,
   SemifStatus,
   SessionStatus,
 } from "@opencode-ai/sdk/v2/client"
@@ -167,6 +168,16 @@ export const loadSemifStatusQuery = (scope: ServerScope, sdk: OpencodeClient) =>
     refetchInterval: (query) => (isSemifActive(query.state.data?.status) ? 1500 : false),
   })
 
+// Native OMO status is server-global, so the connection scope is the only
+// query-key dimension. Unlike SemIf, preserve request errors so the popover
+// can distinguish a loading state from an unavailable/failed status endpoint.
+export const loadOmoStatusQuery = (scope: ServerScope, sdk: OpencodeClient) =>
+  queryOptions<OmoStatus>({
+    queryKey: [scope, "omo"] as const,
+    queryFn: () => sdk.omo.status().then((result) => result.data!),
+    staleTime: 5_000,
+  })
+
 export const loadActiveSessionsQuery = (
   scope: ServerScope,
   api: SessionActiveApi,
@@ -215,6 +226,7 @@ function makeQueryOptionsApi(
       loadMcpResourcesQuery(scope, directory, serverAPI.mcp, sdkFor(directory), protocol),
     lsp: (directory: PathKey) => loadLspQuery(scope, directory, sdkFor(directory)),
     semif: () => loadSemifStatusQuery(scope, serverSDK()),
+    omo: () => loadOmoStatusQuery(scope, serverSDK()),
     sessions: (directory: PathKey) => ({ queryKey: [scope, directory, "loadSessions"] as const }),
   }
 }
@@ -555,6 +567,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
     if (event.current) session.applyV2(event.current)
     session.apply(event)
+    if (event.type === "server.disconnected") return
     if (event.type === "session.created" || event.type === "session.updated" || event.type === "session.deleted") {
       homeSessions.apply(event)
     }

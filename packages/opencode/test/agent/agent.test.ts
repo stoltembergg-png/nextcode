@@ -55,6 +55,12 @@ it.instance("returns default native agents when no config", () =>
     expect(names).toContain("compaction")
     expect(names).toContain("title")
     expect(names).toContain("summary")
+    expect(names).toContain("orchestrator")
+    expect(names).toContain("librarian")
+    expect(names).toContain("oracle")
+    expect(names).toContain("designer")
+    expect(names).toContain("fixer")
+    expect(names).not.toContain("observer")
   }),
 )
 
@@ -646,19 +652,31 @@ it.instance(
   },
 )
 
-it.instance("defaultAgent returns build when no default_agent config", () =>
+it.instance("defaultAgent returns orchestrator when OMO is enabled by default", () =>
+  Effect.gen(function* () {
+    const agent = yield* load((svc) => svc.defaultAgent())
+    expect(agent).toBe("orchestrator")
+  }),
+)
+
+it.instance("defaultInfo returns resolved orchestrator when OMO is enabled by default", () =>
+  Effect.gen(function* () {
+    const agent = yield* load((svc) => svc.defaultInfo())
+    expect(agent.name).toBe("orchestrator")
+    expect(agent.mode).toBe("primary")
+  }),
+)
+
+it.instance("disabled OMO preserves build as the default agent", () =>
   Effect.gen(function* () {
     const agent = yield* load((svc) => svc.defaultAgent())
     expect(agent).toBe("build")
   }),
-)
-
-it.instance("defaultInfo returns resolved build agent when no default_agent config", () =>
-  Effect.gen(function* () {
-    const agent = yield* load((svc) => svc.defaultInfo())
-    expect(agent.name).toBe("build")
-    expect(agent.mode).toBe("primary")
-  }),
+  {
+    config: {
+      omo: { enabled: false },
+    },
+  },
 )
 
 it.instance(
@@ -734,9 +752,92 @@ it.instance(
     }),
   {
     config: {
+      omo: { enabled: false },
       agent: {
         build: { disable: true },
       },
+    },
+  },
+)
+
+it.instance("native OMO agents share model and permission resolution with config", () =>
+  Effect.gen(function* () {
+    const agents = yield* load((svc) => svc.list())
+    const names = agents.map((agent) => agent.name)
+    expect(names.filter((name) => name === "explore")).toHaveLength(1)
+    expect(names).toContain("orchestrator")
+    expect(names).toContain("librarian")
+    expect(names).toContain("oracle")
+    expect(names).toContain("designer")
+    expect(names).toContain("fixer")
+    expect(names).not.toContain("observer")
+
+    const orchestrator = yield* load((svc) => svc.get("orchestrator"))
+    const librarian = yield* load((svc) => svc.get("librarian"))
+    const fixer = yield* load((svc) => svc.get("fixer"))
+    expect(orchestrator?.mode).toBe("primary")
+    expect(orchestrator?.model).toMatchObject({ providerID: "openai", modelID: "gpt-5.6-terra" })
+    expect(orchestrator?.variant).toBe("high")
+    expect(librarian?.mode).toBe("subagent")
+    expect(fixer?.model).toMatchObject({ providerID: "anthropic", modelID: "claude-sonnet-4-6" })
+    expect(evalPerm(fixer, "edit")).toBe("deny")
+    expect(Permission.evaluate("task", "*", librarian!.permission).action).toBe("deny")
+    expect(Permission.evaluate("websearch", "*", librarian!.permission).action).toBe("allow")
+  }),
+  {
+    config: {
+      omo: {
+        preset: "openai",
+        disabled_agents: ["observer"],
+        agents: {
+          fixer: { model: "anthropic/claude-sonnet-4-6", permission: { edit: "deny" } },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "global user permissions remain authoritative for native OMO agents",
+  () =>
+    Effect.gen(function* () {
+      const explore = yield* load((svc) => svc.get("explore"))
+      expect(explore).toBeDefined()
+      expect(evalPerm(explore, "edit")).toBe("allow")
+    }),
+  {
+    config: {
+      permission: {
+        edit: "allow",
+      },
+    },
+  },
+)
+
+it.instance("legacy plugin conflict suppresses native OMO agents", () =>
+  Effect.gen(function* () {
+    const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+    expect(names).not.toContain("orchestrator")
+    expect(names).not.toContain("librarian")
+    expect(yield* load((svc) => svc.defaultAgent())).toBe("build")
+  }),
+  {
+    config: {
+      plugin: ["oh-my-opencode-slim@2.2.22"],
+    },
+  },
+)
+
+it.instance("OMO disabled_agents removes the pre-registered explore agent", () =>
+  Effect.gen(function* () {
+    const explore = yield* load((svc) => svc.get("explore"))
+    expect(explore).toBeUndefined()
+    const names = (yield* load((svc) => svc.list())).map((agent) => agent.name)
+    expect(names).not.toContain("explore")
+  }),
+  {
+    config: {
+      omo: { disabled_agents: ["explore"] },
     },
   },
 )
@@ -746,6 +847,7 @@ it.instance(
   () => expectDefaultAgentError("no primary visible agent found"),
   {
     config: {
+      omo: { enabled: false },
       agent: {
         build: { disable: true },
         plan: { disable: true },

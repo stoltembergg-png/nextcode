@@ -108,6 +108,7 @@ export class SemifServiceError extends Schema.TaggedErrorClass<SemifServiceError
 
 export interface Interface {
   readonly status: () => Effect.Effect<Status>
+  readonly statusReadOnly: () => Effect.Effect<Status>
   readonly start: () => Effect.Effect<Status, SemifServiceError>
   readonly acquire: () => Effect.Effect<Status, SemifServiceError>
   readonly decide: (request: SemifDecisionRequest) => Effect.Effect<SemifDecision, SemifServiceError>
@@ -169,60 +170,64 @@ const layer = Layer.effect(
         Effect.provideService(Scope.Scope, scope),
       )
 
-    const load = Effect.gen(function* () {
-      const info = yield* config.getGlobal()
-      const block = info.semif
-      const entry = SemifManifest.find(block?.model)
-      const resolved = parseSemifOptions({
-        mode: block?.mode,
-        backend: block?.backend,
-        routing: block?.routing,
-        modelPath: block?.model_path,
-        serverPath: block?.server_path,
-        port: block?.port,
-        threads: block?.threads,
-        contextSize: block?.contextSize,
-        nProbs: block?.nProbs,
-        cacheSize: block?.cacheSize,
-        host: block?.host,
+    const loadWith = (getConfig: Config.Interface["getGlobal"]) =>
+      Effect.gen(function* () {
+        const info = yield* getConfig()
+        const block = info.semif
+        const entry = SemifManifest.find(block?.model)
+        const resolved = parseSemifOptions({
+          mode: block?.mode,
+          backend: block?.backend,
+          routing: block?.routing,
+          modelPath: block?.model_path,
+          serverPath: block?.server_path,
+          port: block?.port,
+          threads: block?.threads,
+          contextSize: block?.contextSize,
+          nProbs: block?.nProbs,
+          cacheSize: block?.cacheSize,
+          host: block?.host,
+        })
+        const current = yield* Ref.get(state)
+        const backend = SemifBackend.inspect({
+          requested: resolved.backend,
+          serverPath: resolved.serverPath,
+          hipDownloadFailed: current.hipDownloadFailed,
+          hipFetching: current.hipFetching,
+          rocmFetching: current.rocmFetching,
+          vulkanDownloadFailed: current.vulkanDownloadFailed,
+          vulkanFetching: current.vulkanFetching,
+        })
+        if (backend.message) {
+          yield* backend.fallback
+            ? Effect.logWarning(backend.message, {
+                requested: backend.requested,
+                active: backend.active,
+                reason: backend.fallbackReason,
+                systemRuntimeMissing: backend.systemRuntimeMissing,
+              })
+            : Effect.logInfo(backend.message, { active: backend.active })
+        }
+        const activeVariant = backend.active
+        return {
+          entry,
+          download: (block?.download ?? "auto") as DownloadPolicy,
+          resolved,
+          backend,
+          modelPath: entry
+            ? SemifPaths.resolveModelPath({
+                configPath: resolved.modelPath,
+                sha256: entry.sha256,
+                filename: entry.filename,
+              })
+            : undefined,
+          serverPath: SemifPaths.resolveServerPath({ configPath: resolved.serverPath, variant: activeVariant }),
+          libsPath: SemifPaths.resolveLibsPath(undefined, activeVariant),
+        }
       })
-      const current = yield* Ref.get(state)
-      const backend = SemifBackend.inspect({
-        requested: resolved.backend,
-        serverPath: resolved.serverPath,
-        hipDownloadFailed: current.hipDownloadFailed,
-        hipFetching: current.hipFetching,
-        rocmFetching: current.rocmFetching,
-        vulkanDownloadFailed: current.vulkanDownloadFailed,
-        vulkanFetching: current.vulkanFetching,
-      })
-      if (backend.message) {
-        yield* backend.fallback
-          ? Effect.logWarning(backend.message, {
-              requested: backend.requested,
-              active: backend.active,
-              reason: backend.fallbackReason,
-              systemRuntimeMissing: backend.systemRuntimeMissing,
-            })
-          : Effect.logInfo(backend.message, { active: backend.active })
-      }
-      const activeVariant = backend.active
-      return {
-        entry,
-        download: (block?.download ?? "auto") as DownloadPolicy,
-        resolved,
-        backend,
-        modelPath: entry
-          ? SemifPaths.resolveModelPath({
-              configPath: resolved.modelPath,
-              sha256: entry.sha256,
-              filename: entry.filename,
-            })
-          : undefined,
-        serverPath: SemifPaths.resolveServerPath({ configPath: resolved.serverPath, variant: activeVariant }),
-        libsPath: SemifPaths.resolveLibsPath(undefined, activeVariant),
-      }
-    })
+
+    const load = loadWith(config.getGlobal)
+    const loadReadOnly = loadWith(config.getGlobalReadOnly)
 
     const dropHandle = (handle: SemifSidecar.Handle) =>
       Effect.gen(function* () {
@@ -260,64 +265,72 @@ const layer = Layer.effect(
       yield* dropHandle(current.handle)
     })
 
+    const makeSnapshot = (loaded: Effect.Success<typeof load>) =>
+      Effect.gen(function* () {
+        const current = yield* Ref.get(state)
+        const routing = effectiveRouting(loaded.resolved.routing)
+        const base = {
+          mode: loaded.resolved.mode,
+          download: loaded.download,
+          backend: loaded.backend.active,
+          backendRequested: loaded.backend.requested,
+          backendFallback: loaded.backend.fallback,
+          backendFallbackReason: loaded.backend.fallbackReason,
+          backendMessage: loaded.backend.message,
+          systemRuntimeMissing: loaded.backend.systemRuntimeMissing,
+          routing: {
+            requested: loaded.resolved.routing,
+            effective: routing.effective,
+            fallbackReason: routing.fallbackReason,
+            last: current.last,
+          },
+          host: loaded.resolved.host,
+          port: current.handle?.port ?? loaded.resolved.port,
+          pid: current.handle?.pid,
+          adopted: current.handle?.adopted ?? false,
+          model: loaded.entry
+            ? {
+                id: loaded.entry.id,
+                filename: loaded.entry.filename,
+                sha256: loaded.entry.sha256,
+                bytes: loaded.entry.bytes,
+                quant: loaded.entry.quant,
+              }
+            : undefined,
+          choices: SemifManifest.CHOICES.map((entry) => ({
+            id: entry.id,
+            label: entry.label,
+            quant: entry.quant,
+          })),
+          modelPath: loaded.modelPath,
+          serverPath: loaded.serverPath,
+          progress: live.progress,
+          error: current.error,
+        } satisfies Omit<Status, "status">
+
+        if (current.handle) return { ...base, status: "ready" as SemifStatus }
+        if (current.status === "downloading" || current.status === "verifying" || current.status === "starting") {
+          return { ...base, status: current.status }
+        }
+        if (loaded.resolved.mode === "off") return { ...base, status: "disabled" as SemifStatus }
+        if (!loaded.entry) return { ...base, status: "unsupported" as SemifStatus }
+        if (!loaded.serverPath) return { ...base, status: "offline" as SemifStatus }
+        if (current.status === "failed") return { ...base, status: "failed" as SemifStatus }
+        const modelExists = loaded.modelPath
+          ? yield* fs.exists(loaded.modelPath).pipe(Effect.orElseSucceed(() => false))
+          : false
+        if (!modelExists) return { ...base, status: "not_downloaded" as SemifStatus }
+        return { ...base, status: "offline" as SemifStatus }
+      })
+
+    const snapshotReadOnly = Effect.gen(function* () {
+      return yield* makeSnapshot(yield* loadReadOnly)
+    })
+
     const snapshot = Effect.gen(function* () {
       yield* dropHandleIfStale
       yield* dropHandleIfDead
-      const loaded = yield* load
-      const current = yield* Ref.get(state)
-      const routing = effectiveRouting(loaded.resolved.routing)
-      const base = {
-        mode: loaded.resolved.mode,
-        download: loaded.download,
-        backend: loaded.backend.active,
-        backendRequested: loaded.backend.requested,
-        backendFallback: loaded.backend.fallback,
-        backendFallbackReason: loaded.backend.fallbackReason,
-        backendMessage: loaded.backend.message,
-        systemRuntimeMissing: loaded.backend.systemRuntimeMissing,
-        routing: {
-          requested: loaded.resolved.routing,
-          effective: routing.effective,
-          fallbackReason: routing.fallbackReason,
-          last: current.last,
-        },
-        host: loaded.resolved.host,
-        port: current.handle?.port ?? loaded.resolved.port,
-        pid: current.handle?.pid,
-        adopted: current.handle?.adopted ?? false,
-        model: loaded.entry
-          ? {
-              id: loaded.entry.id,
-              filename: loaded.entry.filename,
-              sha256: loaded.entry.sha256,
-              bytes: loaded.entry.bytes,
-              quant: loaded.entry.quant,
-            }
-          : undefined,
-        choices: SemifManifest.CHOICES.map((entry) => ({
-          id: entry.id,
-          label: entry.label,
-          quant: entry.quant,
-        })),
-        modelPath: loaded.modelPath,
-        serverPath: loaded.serverPath,
-        progress: live.progress,
-        error: current.error,
-      } satisfies Omit<Status, "status">
-
-      if (current.handle) return { ...base, status: "ready" as SemifStatus }
-      if (current.status === "downloading" || current.status === "verifying" || current.status === "starting") {
-        return { ...base, status: current.status }
-      }
-      if (loaded.resolved.mode === "off") return { ...base, status: "disabled" as SemifStatus }
-      if (!loaded.entry) return { ...base, status: "unsupported" as SemifStatus }
-      if (!loaded.serverPath) return { ...base, status: "offline" as SemifStatus }
-      if (current.status === "failed") return { ...base, status: "failed" as SemifStatus }
-      const modelExists = loaded.modelPath
-        ? yield* fs.exists(loaded.modelPath).pipe(Effect.orElseSucceed(() => false))
-        : false
-      if (!modelExists) return { ...base, status: "not_downloaded" as SemifStatus }
-      return { ...base, status: "offline" as SemifStatus }
+      return yield* makeSnapshot(yield* load)
     })
 
     const ensureVulkanRuntime = Effect.gen(function* () {
@@ -564,6 +577,7 @@ const layer = Layer.effect(
 
     const result: Interface = {
       status: () => snapshot,
+      statusReadOnly: () => snapshotReadOnly,
       start: () =>
         Effect.gen(function* () {
           const loaded = yield* load

@@ -2,14 +2,23 @@ import { describe, expect } from "bun:test"
 import { Effect, Exit, Scope } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Location } from "@opencode-ai/core/location"
 import { AgentPlugin } from "@opencode-ai/core/plugin/agent"
+import { Config } from "@opencode-ai/core/config"
+import { ConfigAgent } from "@opencode-ai/core/config/agent"
+import { ConfigAgentPlugin } from "@opencode-ai/core/config/plugin/agent"
+import { ConfigOmo } from "@opencode-ai/core/config/omo"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Global } from "@opencode-ai/core/global"
+import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
 import { agentHost, host } from "./plugin/host"
 
 const it = testEffect(AppNodeBuilder.build(AgentV2.node))
+const itWithConfigAgent = testEffect(AppNodeBuilder.build(LayerNode.group([AgentV2.node, FSUtil.node, Global.node])))
 
 describe("AgentV2", () => {
   it.effect("starts without agents", () =>
@@ -126,6 +135,146 @@ describe("AgentV2", () => {
       for (const item of agents) {
         expect(item.permissions.some((rule) => rule.action === "bash" && rule.effect !== "deny")).toBe(false)
       }
+    }),
+  )
+
+  it.effect("registers the shared native OMO roster and applies config overrides", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({
+                  preset: "openai",
+                  disabled_agents: ["librarian"],
+                  agents: {
+                    fixer: { model: "anthropic/claude-sonnet-4-6", permission: { edit: "deny" } },
+                  },
+                }),
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      const agents = yield* agent.all()
+      const names = agents.map((item) => String(item.id))
+      expect(names.filter((name) => name === "explore")).toHaveLength(1)
+      expect(names).toContain("orchestrator")
+      expect(names).toContain("oracle")
+      expect(names).toContain("designer")
+      expect(names).toContain("fixer")
+      expect(names).not.toContain("librarian")
+      expect(names).not.toContain("observer")
+
+      const orchestrator = yield* agent.get(AgentV2.ID.make("orchestrator"))
+      const explore = yield* agent.get(AgentV2.ID.make("explore"))
+      const fixer = yield* agent.get(AgentV2.ID.make("fixer"))
+      expect(orchestrator?.mode).toBe("primary")
+      expect(orchestrator?.model).toMatchObject({ providerID: "openai", id: "gpt-5.6-terra", variant: "high" })
+      expect(explore?.mode).toBe("subagent")
+      expect(fixer?.mode).toBe("subagent")
+      expect(fixer?.model).toMatchObject({ providerID: "anthropic", id: "claude-sonnet-4-6" })
+      expect(PermissionV2.evaluate("edit", "*", fixer?.permissions ?? []).effect).toBe("deny")
+      expect(yield* agent.default()).toMatchObject({ id: AgentV2.ID.make("orchestrator") })
+    }),
+  )
+
+  it.effect("suppresses native OMO agents when the legacy plugin is configured", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ plugins: ["oh-my-opencode-slim@2.2.22"] }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("orchestrator"))).toBeUndefined()
+      expect(yield* agent.default()).toMatchObject({ id: AgentV2.ID.make("build") })
+    }),
+  )
+
+  it.effect("removes the pre-registered explore agent when OMO disables it", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({ disabled_agents: ["explore"] }),
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("explore"))).toBeUndefined()
+    }),
+  )
+
+  itWithConfigAgent.effect("applies a pending native variant after a later V2 model override", () =>
+    Effect.gen(function* () {
+      const agent = yield* AgentV2.Service
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({
+                omo: new ConfigOmo.Info({ agents: { designer: { variant: "medium" } } }),
+                agents: { designer: new ConfigAgent.Info({ model: "anthropic/claude-sonnet-4-6" }) },
+              }),
+            }),
+          ]),
+      })
+
+      yield* AgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(
+          Location.Service,
+          Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+        ),
+        Effect.provideService(Config.Service, config),
+      )
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agent) })).pipe(
+        Effect.provideService(Config.Service, config),
+        Effect.provideService(FSUtil.Service, yield* FSUtil.Service),
+        Effect.provideService(Global.Service, yield* Global.Service),
+      )
+
+      expect(yield* agent.get(AgentV2.ID.make("designer"))).toMatchObject({
+        model: { providerID: "anthropic", id: "claude-sonnet-4-6", variant: "medium" },
+      })
     }),
   )
 })

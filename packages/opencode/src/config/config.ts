@@ -2,7 +2,6 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import path from "path"
-import { pathToFileURL } from "url"
 import os from "os"
 import { mergeDeep } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -125,6 +124,7 @@ type State = {
 export interface Interface {
   readonly get: () => Effect.Effect<Info>
   readonly getGlobal: () => Effect.Effect<Info>
+  readonly getGlobalReadOnly: () => Effect.Effect<Info>
   readonly getConsoleState: () => Effect.Effect<ConsoleState>
   readonly update: (config: Info) => Effect.Effect<void>
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
@@ -256,11 +256,45 @@ const layer = Layer.effect(
       return data
     })
 
+    const loadConfigReadOnly = Effect.fnUntraced(function* (
+      text: string,
+      options: { path: string } | { dir: string; source: string },
+      env?: Record<string, string>,
+    ) {
+      const source = "path" in options ? options.path : options.source
+      const expanded = yield* Effect.promise(() =>
+        ConfigVariable.substitute(
+          "path" in options
+            ? { text, type: "path", path: options.path, env }
+            : { text, type: "virtual", ...options, env },
+        ),
+      )
+      const parsed = ConfigParse.jsonc(expanded, source)
+      return yield* decodeConfig(parsed, source)
+    })
+
     const loadFile = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
       return yield* loadConfig(text, { path: filepath }, env)
+    })
+
+    const loadFileReadOnly = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>) {
+      yield* Effect.logInfo("loading", { path: filepath })
+      const text = yield* readConfigFile(filepath)
+      if (!text) return {} as Info
+      return yield* loadConfigReadOnly(text, { path: filepath }, env)
+    })
+
+    const readLegacyConfig = Effect.fnUntraced(function* (filepath: string) {
+      if (!existsSync(filepath)) return undefined
+      return yield* Effect.promise(() =>
+        fsNode
+          .readFile(filepath, "utf8")
+          .then((text) => Bun.TOML.parse(text) as Record<string, unknown>)
+          .catch(() => undefined),
+      )
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -280,19 +314,42 @@ const layer = Layer.effect(
       result = mergeConfig(result, yield* loadFile(path.join(Global.Path.config, "opencode.jsonc"), env))
 
       const legacy = path.join(Global.Path.config, "config")
-      if (existsSync(legacy)) {
+      const legacyConfig = yield* readLegacyConfig(legacy)
+      if (legacyConfig) {
+        const { provider, model, ...rest } = legacyConfig as Record<string, unknown> & {
+          provider?: string
+          model?: string
+        }
+        if (provider && model) result.model = `${provider}/${model}`
+        result["$schema"] = "https://opencode.ai/config.json"
+        result = mergeConfig(result, rest)
         yield* Effect.promise(() =>
-          import(pathToFileURL(legacy).href, { with: { type: "toml" } })
-            .then(async (mod) => {
-              const { provider, model, ...rest } = mod.default
-              if (provider && model) result.model = `${provider}/${model}`
-              result["$schema"] = "https://opencode.ai/config.json"
-              result = mergeConfig(result, rest)
-              await fsNode.writeFile(path.join(Global.Path.config, "config.json"), JSON.stringify(result, null, 2))
-              await fsNode.unlink(legacy)
-            })
-            .catch(() => {}),
+          fsNode
+            .writeFile(path.join(Global.Path.config, "config.json"), JSON.stringify(result, null, 2))
+            .then(() => fsNode.unlink(legacy))
+            .then(() => undefined)
+            .catch(() => undefined),
         )
+      }
+
+      return result
+    })
+
+    const loadGlobalReadOnly = Effect.fnUntraced(function* (env?: Record<string, string>) {
+      let result: Info = {}
+      result = mergeConfig(result, yield* loadFileReadOnly(path.join(Global.Path.config, "config.json"), env))
+      result = mergeConfig(result, yield* loadFileReadOnly(path.join(Global.Path.config, "opencode.json"), env))
+      result = mergeConfig(result, yield* loadFileReadOnly(path.join(Global.Path.config, "opencode.jsonc"), env))
+
+      const legacyConfig = yield* readLegacyConfig(path.join(Global.Path.config, "config"))
+      if (legacyConfig) {
+        const { provider, model, ...rest } = legacyConfig as Record<string, unknown> & {
+          provider?: string
+          model?: string
+        }
+        if (provider && model) result.model = `${provider}/${model}`
+        result["$schema"] = "https://opencode.ai/config.json"
+        result = mergeConfig(result, rest)
       }
 
       return result
@@ -310,6 +367,15 @@ const layer = Layer.effect(
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
       return yield* cachedGlobal
+    })
+
+    const getGlobalReadOnly = Effect.fn("Config.getGlobalReadOnly")(function* () {
+      return yield* loadGlobalReadOnly().pipe(
+        Effect.tapError((error) =>
+          Effect.logError("failed to read global config, using defaults", { error: String(error) }),
+        ),
+        Effect.orElseSucceed((): Info => ({})),
+      )
     })
 
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {
@@ -729,6 +795,7 @@ const layer = Layer.effect(
     return Service.of({
       get,
       getGlobal,
+      getGlobalReadOnly,
       getConsoleState,
       update,
       updateGlobal,

@@ -54,6 +54,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { DelegationService } from "@/omo/delegation"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -80,6 +81,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     SessionProjector.node,
     SessionStatus.node,
     BackgroundJob.node,
+    DelegationService.node,
     RuntimeFlags.node,
     EventV2Bridge.node,
     SessionRunState.node,

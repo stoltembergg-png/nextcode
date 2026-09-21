@@ -51,7 +51,7 @@ interface Marker {
   variant: SemifVariant
   asset: string
   sha256: string
-  staged: { path: string; bytes: number }[]
+  staged: { path: string; bytes: number; sha256: string }[]
 }
 
 interface ExtractedFile {
@@ -186,7 +186,15 @@ export async function stageSemifServer(options: StageOptions = {}) {
   // already staged: the caller may only want the durable copy for mirroring.
   if (!options.downloadOnly && !options.force && (await isUpToDate(markerPath, lock.tag, entry))) {
     console.log(`llama-server for ${target} is already staged: ${stagedServer}`)
-    return { target, baseTarget, variant, stagedServer, libsDir, archive: path.join(cacheDir, entry.asset), skipped: true }
+    return {
+      target,
+      baseTarget,
+      variant,
+      stagedServer,
+      libsDir,
+      archive: path.join(cacheDir, entry.asset),
+      skipped: true,
+    }
   }
 
   mkdirSync(cacheDir, { recursive: true })
@@ -214,12 +222,14 @@ export async function stageSemifServer(options: StageOptions = {}) {
 
   const serverBytes = await binary.read()
   await Bun.write(stagedServer, serverBytes)
-  const staged: Marker["staged"] = [{ path: stagedServer, bytes: serverBytes.byteLength }]
+  const staged: Marker["staged"] = [
+    { path: stagedServer, bytes: serverBytes.byteLength, sha256: hashBytes(serverBytes) },
+  ]
   for (const library of libraries) {
     const destination = path.join(libsDir, library.name)
     const bytes = await library.read()
     await Bun.write(destination, bytes)
-    staged.push({ path: destination, bytes: bytes.byteLength })
+    staged.push({ path: destination, bytes: bytes.byteLength, sha256: hashBytes(bytes) })
   }
 
   if (!isZip) {
@@ -239,8 +249,19 @@ async function isUpToDate(markerPath: string, tag: string, entry: TargetLock): P
   const marker = (await Bun.file(markerPath)
     .json()
     .catch(() => undefined)) as Marker | undefined
-  if (!marker || marker.tag !== tag || marker.sha256 !== entry.sha256) return false
-  return marker.staged.every((file) => existsSync(file.path) && statSync(file.path).size === file.bytes)
+  if (!marker || !Array.isArray(marker.staged) || marker.tag !== tag || marker.sha256 !== entry.sha256) return false
+  return (
+    await Promise.all(
+      marker.staged.map(async (file) => {
+        if (!file.sha256 || !existsSync(file.path) || statSync(file.path).size !== file.bytes) return false
+        try {
+          return (await inspect(file.path)).sha256 === file.sha256
+        } catch {
+          return false
+        }
+      }),
+    )
+  ).every(Boolean)
 }
 
 async function downloadUrl(url: string, dest: string): Promise<string | undefined> {
@@ -299,6 +320,12 @@ export async function inspect(file: string): Promise<{ bytes: number; sha256: st
   const hasher = new Bun.CryptoHasher("sha256")
   hasher.update(bytes)
   return { bytes: bytes.byteLength, sha256: hasher.digest("hex") }
+}
+
+function hashBytes(bytes: Uint8Array): string {
+  const hasher = new Bun.CryptoHasher("sha256")
+  hasher.update(bytes)
+  return hasher.digest("hex")
 }
 
 export function serverExecutableName(asset: string): string {

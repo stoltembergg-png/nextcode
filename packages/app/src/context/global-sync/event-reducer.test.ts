@@ -72,6 +72,8 @@ const baseState = (input: Partial<State> = {}) =>
     sessionTotal: 0,
     session_status: {},
     session_diff: {},
+    omo_routing_activity: {},
+    omo_routing_watermark: {},
     todo: {},
     permission: {},
     question: {},

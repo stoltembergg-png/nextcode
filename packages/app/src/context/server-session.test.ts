@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { retry } from "@opencode-ai/core/util/retry"
 import type { OpenCodeEvent, SessionApi } from "@opencode-ai/client/promise"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import type { Message, OpencodeClient, Part, Session } from "@opencode-ai/sdk/v2/client"
 import { createServerSession } from "./server-session"
 import type { ServerApi } from "@/utils/server"
@@ -60,6 +61,21 @@ const textPart = (messageID: string, input: Partial<TextPart> = {}): TextPart =>
   type: "text",
   text: "text",
   ...input,
+})
+
+const routing = (input: {
+  sessionID: string
+  assistantMessageID: string
+  toolCallID: string
+  sequence: number
+  state: OmoRoutingEvent.OmoRoutingActivity["state"]
+}) => ({
+  type: "session.omo.routing",
+  properties: {
+    ...input,
+    startedAt: 100,
+    updatedAt: 100 + input.sequence,
+  },
 })
 
 const response = (data: MessageResponse["data"] = [], cursor?: string): MessageResponse => ({
@@ -162,6 +178,124 @@ function setup(sessions: Record<string, Session>) {
 }
 
 describe("server session", () => {
+  test("projects ordered OMO routing activity and ignores duplicate or lower sequences", () => {
+    const store = setup({ child: session("child") }).store
+    const key = "assistant\0call"
+
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 0, state: { phase: "analyzing" } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 1, state: { phase: "selected", agent: "fixer", source: "semif", background: false, verification: "tests", durationMs: 1 } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 2, state: { phase: "delegating", agent: "fixer", source: "semif", background: false } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 2, state: { phase: "analyzing" } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 1, state: { phase: "analyzing" } }))
+
+    expect(store.data.omo_routing_activity.child?.[key]?.state.phase).toBe("delegating")
+    expect(store.data.omo_routing_watermark.child?.[key]).toBe(2)
+  })
+
+  test("retains routing clear watermarks so delayed activity stays hidden", () => {
+    const store = setup({ child: session("child") }).store
+    const key = "assistant\0call"
+
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 3, state: { phase: "cleared" } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 1, state: { phase: "analyzing" } }))
+
+    expect(store.data.omo_routing_activity.child?.[key]).toBeUndefined()
+    expect(store.data.omo_routing_watermark.child?.[key]).toBe(3)
+  })
+
+  test("keeps routing activity isolated by session and tool call", () => {
+    const store = setup({ child: session("child"), other: session("other") }).store
+
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call-one", sequence: 0, state: { phase: "analyzing" } }))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call-two", sequence: 0, state: { phase: "analyzing" } }))
+    store.apply(routing({ sessionID: "other", assistantMessageID: "assistant", toolCallID: "call-one", sequence: 0, state: { phase: "analyzing" } }))
+
+    expect(Object.values(store.data.omo_routing_activity.child ?? {}).filter(Boolean)).toHaveLength(2)
+    expect(Object.values(store.data.omo_routing_activity.other ?? {}).filter(Boolean)).toHaveLength(1)
+  })
+
+  test("rejects routing activity after an assistant message settles", () => {
+    const store = setup({ child: session("child") }).store
+    store.remember(session("child"))
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 0, state: { phase: "analyzing" } }))
+    expect(store.data.omo_routing_activity.child).toBeDefined()
+    store.apply({ type: "message.updated", properties: { info: assistantMessage("assistant", "user", { time: { created: 0, completed: 0 } }) } })
+    store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 1, state: { phase: "analyzing" } }))
+
+    expect(store.data.omo_routing_activity.child?.["assistant\0call"]).toBeUndefined()
+  })
+
+  test("clears routing activity when a refresh hydrates a settled assistant", async () => {
+    const user = userMessage("message-1", { sessionID: "root" })
+    const pending = assistantMessage("message-2", user.id, {
+      sessionID: "root",
+      time: { created: 2, completed: undefined },
+    })
+    const completed = assistantMessage("message-2", user.id, {
+      sessionID: "root",
+      time: { created: 2, completed: 40 },
+    })
+    const client = messageClient(
+      response([
+        { info: user, parts: [] },
+        { info: pending, parts: [] },
+      ]),
+      response([
+        { info: user, parts: [] },
+        { info: completed, parts: [] },
+      ]),
+    )
+    const store = createServerSession(client, {
+      protocol: Promise.resolve("v1"),
+    })
+    store.remember(session("root"))
+
+    await store.sync("root")
+    store.apply(
+      routing({
+        sessionID: "root",
+        assistantMessageID: pending.id,
+        toolCallID: "call",
+        sequence: 0,
+        state: { phase: "analyzing" },
+      }),
+    )
+    expect(store.data.omo_routing_activity.root?.[`${pending.id}\0call`]).toBeDefined()
+
+    await store.sync("root", { force: true })
+
+    expect(store.data.omo_routing_activity.root?.[`${pending.id}\0call`]).toBeUndefined()
+    expect(store.data.omo_routing_watermark.root?.[`${pending.id}\0call`]).toBeUndefined()
+  })
+
+  test("clears routing activity when sessions settle, reconnect, or are evicted", () => {
+    const store = setup({ child: session("child") }).store
+    store.remember(session("child"))
+    const activity = () => store.apply(routing({ sessionID: "child", assistantMessageID: "assistant", toolCallID: "call", sequence: 0, state: { phase: "analyzing" } }))
+
+    activity()
+    store.apply({ type: "session.status", properties: { sessionID: "child", status: { type: "idle" } } })
+    expect(store.data.omo_routing_activity.child).toBeUndefined()
+
+    ;["session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"].forEach((type) => {
+      activity()
+      store.applyV2({ type, created: 1, data: { sessionID: "child" } } as OpenCodeEvent)
+      expect(store.data.omo_routing_activity.child).toBeUndefined()
+    })
+
+    activity()
+    store.apply({ type: "server.connected" })
+    expect(store.data.omo_routing_activity.child).toBeUndefined()
+
+    activity()
+    store.apply({ type: "server.disconnected" })
+    expect(store.data.omo_routing_activity.child).toBeUndefined()
+
+    activity()
+    store.evict("child")
+    expect(store.data.omo_routing_activity.child).toBeUndefined()
+  })
+
   test("projects V2 session events into current and legacy message state", () => {
     const ctx = setup({ child: session("child") })
     ctx.store.remember(session("child"))

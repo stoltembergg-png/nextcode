@@ -20,7 +20,15 @@ on:
       - "packages/session-ui/**"
       - "packages/client/**"
       - "packages/identity/**"
+      - "packages/core/**"
+      - "packages/schema/**"
       - "packages/opencode/**"
+      - "packages/opencode/src/cli/cmd/debug/**"
+      - "packages/opencode/src/server/routes/instance/httpapi/groups/omo.ts"
+      - "packages/opencode/src/server/routes/instance/httpapi/handlers/omo.ts"
+      - "packages/opencode/src/omo/**"
+      - "packages/desktop/scripts/omo-smoke.ts"
+      - "docs/omo/**"
       - ".github/workflows/tauri-shell-windows.yml"
 
 concurrency:
@@ -121,16 +129,43 @@ jobs:
         working-directory: packages/desktop/src-tauri
         run: cargo build
 
+      - name: Prepare isolated OMO smoke config
+        shell: pwsh
+        run: |
+          $configDir = Join-Path $env:RUNNER_TEMP "nextcode-omo-smoke-config"
+          Push-Location packages/desktop
+          bun run smoke:omo -- --prepare-config $configDir
+          Pop-Location
+          @(
+            "NEXTCODE_SMOKE_CONFIG_DIR=$configDir"
+            "OPENCODE_CONFIG_DIR=$configDir"
+            "XDG_CONFIG_HOME=$configDir"
+            "XDG_CACHE_HOME=$configDir"
+            "XDG_DATA_HOME=$configDir"
+            "XDG_STATE_HOME=$configDir"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run the shell and assert its behaviour
         working-directory: packages/desktop/src-tauri
         shell: bash
+        env:
+          NEXTCODE_SMOKE_USERNAME: opencode
+          NEXTCODE_SMOKE_PASSWORD: omo-smoke-ci
+          NEXTCODE_SMOKE_DEADLINE_MS: "90000"
+          OPENCODE_DISABLE_MODELS_FETCH: "true"
+          OPENCODE_DISABLE_PROJECT_CONFIG: "true"
+          OPENCODE_DB: ":memory:"
+          OPENCODE_PURE: "1"
+          SEMIF_MODE: off
         run: |
           set -uo pipefail
           ./target/debug/opencode-desktop.exe > run.log 2>&1 &
           PID=$!
-          sleep 40
-          kill "$PID" 2>/dev/null || true
-          sleep 3
+          export NEXTCODE_SMOKE_SHELL_PID="$PID"
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          smoke=0
+          (cd .. && bun run smoke:omo -- "src-tauri/binaries/opencode-cli-${TRIPLE}.exe" src-tauri/run.log) || smoke=1
+          if kill -0 "$PID" 2>/dev/null; then kill "$PID" 2>/dev/null || true; fi
           echo "=== shell log (filtered) ==="
           grep -E '^\[(shell|menu|i18n|store|sidecar|window|stub)\]' run.log | head -80 || true
           echo "=== assertions ==="
@@ -143,7 +178,7 @@ jobs:
           grep -q "sidecar killed" run.log || { echo "WARN: sidecar kill on exit not observed"; }
           echo "=== app data ==="
           ls -la "$LOCALAPPDATA/ai.opencode.desktop.v2.dev" 2>/dev/null || true
-          exit $fail
+          exit $((fail + smoke))
 
       - name: Upload shell log
         if: always()

@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
 import { normalizeSessionMessages } from "@/utils/session-message"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 
 mock.module("@opencode-ai/session-ui/message-part", () => ({
   renderable: () => true,
@@ -15,6 +16,170 @@ mock.module("@opencode-ai/session-ui/message-part", () => ({
 const { Timeline, TimelineRow } = await import("./rows")
 
 describe("current session timeline rows", () => {
+  test("attaches the newest matching activity only to the active thinking turn", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "route", time: { created: 1 } },
+      {
+        id: "msg_assistant", type: "assistant", agent: "build", model: { id: "model", providerID: "provider" }, content: [], time: { created: 2 },
+      },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const activity = (updatedAt: number, assistantMessageID: string, toolCallID: string, sessionID = "ses_1") =>
+      ({
+        sessionID,
+        assistantMessageID,
+        toolCallID,
+        sequence: 0,
+        startedAt: 0,
+        updatedAt,
+        state: { phase: "analyzing" },
+      }) as OmoRoutingEvent.OmoRoutingActivity
+
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        activity(1, "msg_assistant", "call_old"),
+        activity(3, "msg_assistant", "call_new"),
+        activity(4, "msg_assistant", "call_other_session", "ses_2"),
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_new")
+  })
+
+  test("falls back to a newer unprojected assistant activity on the active final turn", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "route", time: { created: 1_000 } },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const activity = (startedAt: number, updatedAt: number, assistantMessageID: string, toolCallID: string) =>
+      ({
+        sessionID: "ses_1",
+        assistantMessageID,
+        toolCallID,
+        sequence: 0,
+        startedAt,
+        updatedAt,
+        state: { phase: "analyzing" },
+      }) as OmoRoutingEvent.OmoRoutingActivity
+
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        activity(900, 950, "msg_unrelated", "call_unrelated"),
+        activity(1_100, 1_200, "msg_assistant_new", "call_new"),
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_new")
+  })
+
+  test("prefers an exact current assistant activity over a newer fallback candidate", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "route", time: { created: 1_000 } },
+      {
+        id: "msg_assistant_current",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [],
+        time: { created: 1_100 },
+      },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const activity = (startedAt: number, updatedAt: number, assistantMessageID: string, toolCallID: string) =>
+      ({
+        sessionID: "ses_1",
+        assistantMessageID,
+        toolCallID,
+        sequence: 0,
+        startedAt,
+        updatedAt,
+        state: { phase: "analyzing" },
+      }) as OmoRoutingEvent.OmoRoutingActivity
+
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        activity(1_100, 1_200, "msg_assistant_current", "call_current"),
+        activity(1_300, 1_400, "msg_assistant_unrelated", "call_unrelated"),
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_current")
+  })
+
+  test("keeps routing feedback visible beside a running tool when reasoning summaries are enabled", () => {
+    const source = [
+      { id: "msg_user", type: "user", text: "delegate", time: { created: 1_000 } },
+      {
+        id: "msg_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { id: "model", providerID: "provider" },
+        content: [
+          {
+            type: "tool",
+            id: "call_delegate",
+            name: "omo_delegate",
+            state: { status: "running", input: {}, metadata: {} },
+            time: { created: 1_100 },
+          },
+        ],
+        time: { created: 1_100 },
+      },
+    ] satisfies SessionMessageInfo[]
+    const normalized = normalizeSessionMessages("ses_1", source)
+    const messages = new Map(normalized.messages.map((message) => [message.id, message]))
+    const result = Timeline.constructSessionMessageRows(
+      source,
+      (messageID) => messages.get(messageID),
+      (messageID) => normalized.parts.get(messageID) ?? [],
+      true,
+      "busy",
+      true,
+      normalized.messages.filter((message) => message.role === "user"),
+      [
+        {
+          sessionID: "ses_1",
+          assistantMessageID: "msg_assistant",
+          toolCallID: "call_delegate",
+          sequence: 0,
+          startedAt: 1_100,
+          updatedAt: 1_100,
+          state: { phase: "analyzing" },
+        } as unknown as OmoRoutingEvent.OmoRoutingActivity,
+      ],
+    )
+
+    const thinking = result.rows.find((row) => row._tag === "Thinking")
+    expect(thinking?.routingActivity?.toolCallID).toBe("call_delegate")
+  })
+
   test("derives turns and tagged rows from chronological current messages", () => {
     const source = [
       { id: "msg_1", type: "user", text: "first", time: { created: 1 } },

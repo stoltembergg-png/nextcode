@@ -90,11 +90,18 @@ export const Plugin = define({
               if (!exists) agent.permissions.push(...permissions)
               if (item.model !== undefined) {
                 const model = ModelV2.parse(item.model)
-                agent.model = { id: model.modelID, providerID: model.providerID, variant: agent.model?.variant }
+                agent.model = {
+                  id: model.modelID,
+                  providerID: model.providerID,
+                  variant: agent.model?.variant ?? AgentV2.nativeVariant(agent),
+                }
               }
-              if (item.variant !== undefined && agent.model !== undefined) {
-                agent.model.variant = ModelV2.VariantID.make(item.variant)
+              if (item.variant !== undefined) {
+                const variant = ModelV2.VariantID.make(item.variant)
+                if (agent.model === undefined) AgentV2.setNativeVariant(agent, variant)
+                else agent.model.variant = variant
               }
+              if (agent.model !== undefined) AgentV2.setNativeVariant(agent, undefined)
               if (item.request !== undefined) {
                 Object.assign(agent.request.headers, item.request.headers ?? {})
                 Object.assign(agent.request.body, item.request.body ?? {})

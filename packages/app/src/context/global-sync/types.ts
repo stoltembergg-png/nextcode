@@ -15,6 +15,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import type { CommandInfo, McpResource, McpServer, SessionMessageInfo } from "@opencode-ai/client/promise"
 import type { Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"
@@ -51,6 +52,8 @@ export type State = {
   session_diff: {
     [sessionID: string]: FileDiffInfo[]
   }
+  omo_routing_activity: Record<string, Record<string, OmoRoutingEvent.OmoRoutingActivity | undefined> | undefined>
+  omo_routing_watermark: Record<string, Record<string, number | undefined> | undefined>
   todo: {
     [sessionID: string]: Todo[]
   }

@@ -66,6 +66,18 @@ const scenarios: Scenario[] = [
       check(body.healthy === true, "server should report healthy")
     }),
   http.protected
+    .get("/omo/status", "omo.status")
+    .global()
+    .json(200, (body) => {
+      object(body)
+      check(typeof body.enabled === "boolean", "OMO status should expose enabled state")
+      check(typeof body.preset === "string", "OMO status should expose preset")
+      array(body.agents)
+      object(body.semif)
+      object(body.conflict)
+      check(typeof body.conflict.active === "boolean", "OMO status should expose legacy conflict state")
+    }),
+  http.protected
     .get("/global/event", "global.event")
     .global()
     .stream()

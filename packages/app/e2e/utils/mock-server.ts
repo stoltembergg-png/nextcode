@@ -28,11 +28,22 @@ export interface MockServerConfig {
   fileContent?: (path: string) => unknown | Promise<unknown>
   findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown | Promise<unknown>
   sessionStatus?: Record<string, unknown> | (() => Record<string, unknown>)
+  omo?: MockOmoData
+}
+
+export type MockOmoData = {
+  status?: unknown | (() => unknown)
+  agents?: unknown[] | (() => unknown[])
+  delegateParts?: (sessionID: string, messageID?: string) => unknown[]
+  childSessions?: (sessionID: string) => unknown[]
+  backgroundEvents?: unknown[] | (() => unknown[])
 }
 
 export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
   const cursors = new Map<string, string>()
   let nextCursor = 0
+  const agents = typeof config.omo?.agents === "function" ? config.omo.agents() : (config.omo?.agents ?? defaultAgents())
+  const legacyAgents = config.omo ? agents : [{ name: "build", mode: "primary" }]
   const staticRoutes: Record<string, unknown> = {
     "/path": {
       state: config.directory,
@@ -43,7 +54,7 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
     },
     "/project": [config.project],
     "/project/current": config.project,
-    "/agent": [{ name: "build", mode: "primary" }],
+    "/agent": legacyAgents,
     "/vcs": { branch: "main", default_branch: "main" },
     "/session": config.sessions,
   }
@@ -67,6 +78,9 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
               ...(path === "/global/event"
                 ? [{ payload: { id: "evt_mock_connected", type: "server.connected", properties: {} } }]
                 : []),
+              ...(typeof config.omo?.backgroundEvents === "function"
+                ? config.omo.backgroundEvents()
+                : (config.omo?.backgroundEvents ?? [])),
               ...(events ?? []),
             ],
         config.eventRetry,
@@ -77,6 +91,10 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/api/health" && config.protocol === "v2")
       return json(route, { healthy: true, version: "2.0.0", pid: 1 })
     if (path === "/experimental/capabilities") return json(route, { backgroundSubagents: true })
+    if (path === "/omo/status") {
+      const status = typeof config.omo?.status === "function" ? config.omo.status() : config.omo?.status
+      return json(route, status ?? defaultOmoStatus(config))
+    }
     if (path === "/provider")
       return json(route, typeof config.provider === "function" ? config.provider() : config.provider)
     if (path === "/provider/auth") return json(route, config.integrationMethods ?? {})
@@ -123,16 +141,11 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/api/agent")
       return json(route, {
         location: location(config),
-        data: [
-          {
-            id: "build",
-            name: "Build",
-            mode: "primary",
-            hidden: false,
-            request: { settings: {}, headers: {}, body: {} },
-            permissions: [],
-          },
-        ],
+        data: config.omo?.agents
+          ? typeof config.omo.agents === "function"
+            ? config.omo.agents()
+            : config.omo.agents
+          : defaultAgents(),
       })
     if (path === "/api/command") return json(route, { location: location(config), data: [] })
     if (path === "/api/mcp") return json(route, { location: location(config), data: [] })
@@ -272,7 +285,19 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
 
     const todoMatch = path.match(/^\/session\/([^/]+)\/todo$/)
     if (todoMatch) return json(route, config.todos?.(todoMatch[1]!) ?? [])
-    if (/^\/session\/[^/]+\/(children|diff)$/.test(path)) return json(route, [])
+    const apiChildrenMatch = path.match(/^\/api\/session\/([^/]+)\/(children|diff)$/)
+    if (apiChildrenMatch) {
+      if (apiChildrenMatch[2] === "diff") return json(route, { location: location(config), data: [] })
+      return json(route, {
+        location: location(config),
+        data: config.omo?.childSessions?.(apiChildrenMatch[1]) ?? [],
+      })
+    }
+    const childrenMatch = path.match(/^\/session\/([^/]+)\/(children|diff)$/)
+    if (childrenMatch) {
+      if (childrenMatch[2] === "diff") return json(route, [])
+      return json(route, config.omo?.childSessions?.(childrenMatch[1]) ?? [])
+    }
 
     const currentMessagesMatch = path.match(/^\/api\/session\/([^/]+)\/message$/)
     if (currentMessagesMatch) {
@@ -287,7 +312,7 @@ export async function mockNextCodeServer(page: Page, config: MockServerConfig) {
       const cursor = pageData.cursor ? `cursor_${++nextCursor}` : undefined
       if (cursor) cursors.set(cursor, pageData.cursor!)
       return json(route, {
-        data: pageData.items.map(currentMessage).reverse(),
+        data: pageData.items.map((item) => currentMessage(item, config)).reverse(),
         cursor: { next: cursor },
       })
     }
@@ -318,6 +343,30 @@ function location(config: MockServerConfig) {
   return {
     directory: config.directory,
     project: { id: (config.project as { id?: string }).id, directory: config.directory },
+  }
+}
+
+function defaultAgents() {
+  return [
+    {
+      id: "build",
+      name: "Build",
+      mode: "primary",
+      hidden: false,
+      request: { settings: {}, headers: {}, body: {} },
+      permissions: [],
+    },
+  ]
+}
+
+function defaultOmoStatus(config: MockServerConfig) {
+  const agents = typeof config.omo?.agents === "function" ? config.omo.agents() : (config.omo?.agents ?? [])
+  return {
+    enabled: false,
+    preset: "auto",
+    agents,
+    semif: { status: "disabled" },
+    conflict: { active: false },
   }
 }
 
@@ -364,9 +413,14 @@ export function currentSession(session: { id: string } & Record<string, unknown>
   }
 }
 
-function currentMessage(value: unknown) {
+function currentMessage(value: unknown, config?: MockServerConfig) {
   const item = value as {
-    info: Record<string, unknown> & { id: string; role: "user" | "assistant"; time: { created: number } }
+    info: Record<string, unknown> & {
+      id: string
+      sessionID?: string
+      role: "user" | "assistant"
+      time: { created: number }
+    }
     parts: Array<Record<string, unknown> & { type: string }>
   }
   if (item.info.role === "user") {
@@ -379,6 +433,10 @@ function currentMessage(value: unknown) {
         .join("\n"),
     }
   }
+  const parts = [...item.parts, ...(config?.omo?.delegateParts?.(item.info.sessionID ?? "", item.info.id) ?? [])].filter(
+    (part): part is Record<string, unknown> & { type: string } =>
+      typeof part === "object" && part !== null && "type" in part && typeof part.type === "string",
+  )
   return {
     id: item.info.id,
     type: "assistant",
@@ -388,7 +446,7 @@ function currentMessage(value: unknown) {
     cost: item.info.cost,
     tokens: item.info.tokens,
     error: item.info.error,
-    content: item.parts.flatMap<unknown>((part) => {
+    content: parts.flatMap<unknown>((part) => {
       if (part.type === "text" || part.type === "reasoning") return [{ type: part.type, text: part.text ?? "" }]
       if (part.type !== "tool") return []
       const state = part.state as Record<string, unknown>

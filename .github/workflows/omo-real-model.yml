@@ -1,0 +1,99 @@
+name: omo-real-model
+
+# The deterministic SemIf contract is covered by the normal package checks. This
+# job is deliberately manual/nightly because it starts the pinned local model and
+# is not suitable for every pull request or every hosted runner.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: omo-real-model
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      SEMIF_VARIANT: cpu
+      SEMIF_MODEL_PATH: ${{ github.workspace }}/.ci-cache/semif/LFM2-1.2B-Q4_K_M.gguf
+      SEMIF_SERVER_PATH: ${{ github.workspace }}/packages/desktop/src-tauri/binaries/llama-server-x86_64-unknown-linux-gnu
+      SEMIF_SERVER_MARKER: ${{ github.workspace }}/packages/desktop/src-tauri/.semif-cache/x86_64-unknown-linux-gnu.json
+      OMO_REAL_MODEL_REQUIRED: "1"
+      OMO_REAL_MODEL_OUTPUT: omo-real-model.json
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup pinned Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore verified SemIf artifacts
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .ci-cache/semif
+            packages/desktop/src-tauri/.semif-cache
+            packages/desktop/src-tauri/binaries
+            packages/desktop/src-tauri/semif
+          key: omo-semif-${{ runner.os }}-${{ hashFiles('packages/opencode/src/semif/manifest.ts', 'packages/opencode/script/semif-server.lock.json') }}
+
+      - name: Download and stage pinned SemIf artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-cache/semif
+          MODEL_NAME=$(bun -e 'import { SemifManifest } from "./packages/opencode/src/semif/manifest"; process.stdout.write(SemifManifest.MODEL.filename)')
+          MODEL_URL=$(bun -e 'import { SemifManifest } from "./packages/opencode/src/semif/manifest"; process.stdout.write(SemifManifest.MODEL.url)')
+          MODEL_PATH=".ci-cache/semif/${MODEL_NAME}"
+          if [ ! -f "$MODEL_PATH" ]; then
+            curl --fail --location --silent --show-error --retry 3 --output "${MODEL_PATH}.part" "$MODEL_URL"
+            mv "${MODEL_PATH}.part" "$MODEL_PATH"
+          fi
+          if ! bun packages/opencode/script/fetch-semif-server.ts --target x86_64-unknown-linux-gnu >/dev/null 2>&1; then
+            exit 1
+          fi
+
+      - name: Verify pinned artifacts
+        working-directory: packages/opencode
+        run: bun run script/omo-real-model.ts --verify-only
+
+      - name: Save verified SemIf artifacts
+        uses: actions/cache/save@v4
+        if: success()
+        with:
+          path: |
+            .ci-cache/semif
+            packages/desktop/src-tauri/.semif-cache
+            packages/desktop/src-tauri/binaries
+            packages/desktop/src-tauri/semif
+          key: omo-semif-${{ runner.os }}-${{ hashFiles('packages/opencode/src/semif/manifest.ts', 'packages/opencode/script/semif-server.lock.json') }}
+
+      - name: Run offline OMO/SemIf contract
+        working-directory: packages/opencode
+        run: bun test test/omo/real-model-contract.test.ts --only-failures
+
+      - name: Run real-model probe
+        working-directory: packages/opencode
+        run: bun run script/omo-real-model.ts
+
+      - name: Upload sanitized probe report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: omo-real-model-report
+          path: packages/opencode/omo-real-model.json
+          if-no-files-found: error
+          retention-days: 7
