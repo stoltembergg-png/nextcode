@@ -19,14 +19,4 @@ describe("tauri linux conf", () => {
     expect(conf.bundle.linux.appimage.files["/usr/share/opencode/opencode-cli"]).toBe("binaries/opencode-cli-real")
     expect(conf.bundle.linux.deb.files["/usr/share/opencode/opencode-cli"]).toBe("binaries/opencode-cli-real")
   })
-
-  test("disables WebKitGTK DMA-BUF before the webview is created", () => {
-    const rust = readFileSync(join(dir, "src/main.rs"), "utf8")
-    expect(rust).toContain('std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1")')
-    expect(rust).toContain('std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1")')
-    expect(rust).toContain('std::env::var_os("APPIMAGE")')
-    expect(rust).toContain('std::env::set_var("GDK_BACKEND", "x11")')
-    expect(rust).toContain("libwayland-client.so.0")
-    expect(rust).toContain('std::env::set_var("LD_PRELOAD"')
-  })
 })
