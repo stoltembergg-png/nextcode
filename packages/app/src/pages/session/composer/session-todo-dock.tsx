@@ -216,7 +216,7 @@ export function SessionTodoDock(props: {
   )
 }
 
-export function SessionTodoList(props: { todos: Todo[] }) {
+export function SessionTodoList(props: { todos: Todo[]; compact?: boolean }) {
   const [store, setStore] = createStore({
     stuck: false,
   })
@@ -224,7 +224,7 @@ export function SessionTodoList(props: { todos: Todo[] }) {
   return (
     <div class="relative">
       <div
-        class="px-3 pb-11 flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar"
+        class={`px-3 ${props.compact ? "pb-3" : "pb-11"} flex flex-col gap-1.5 max-h-42 overflow-y-auto no-scrollbar`}
         style={{ "overflow-anchor": "none" }}
         onScroll={(e) => {
           setStore("stuck", e.currentTarget.scrollTop > 0)

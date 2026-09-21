@@ -45,7 +45,7 @@ export function ComposerStripBody(props: {
   return (
     <>
       <Show when={props.todos.length > 0}>
-        <SessionTodoList todos={props.todos} />
+        <SessionTodoList todos={props.todos} compact />
       </Show>
       <Show when={props.revert?.items.length}>
         <SessionRevertList
