@@ -876,7 +876,7 @@ In `packages/app/src/pages/session/timeline/rows.ts`, keep emitting `TimelineRow
     }
 ```
 
-Remove the `showReasoning ? assistantPartRefs.length === 0 : true` condition and the unused `reasoningHeading` field if nothing else reads it. If `TimelineRow.Thinking` still declares `reasoningHeading?`, leaving the field optional is fine; stop passing it.
+Stop passing `reasoningHeading`. Leave the optional field on `TimelineRow.Thinking` so existing constructors keep typechecking. Do not delete the class field in this slice.
 
 - [ ] **Step 6: Re-run thinking tests and session-ui typecheck**
 
