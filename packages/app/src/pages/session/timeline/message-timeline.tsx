@@ -20,7 +20,6 @@ import { Accordion } from "@opencode-ai/ui/accordion"
 import { Button } from "@opencode-ai/ui/button"
 import { Card } from "@opencode-ai/ui/card"
 import {
-  ContextToolGroup,
   EditToolGroup,
   Message,
   MessageDivider,
@@ -46,7 +45,6 @@ import { ThinkingStatus } from "@opencode-ai/session-ui/thinking-status"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -84,7 +82,6 @@ import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
-const emptyTools: ToolPart[] = []
 const emptyEditItems: EditToolItem[] = []
 const emptyAssistantMessages: AssistantMessage[] = []
 const idle = { type: "idle" as const }
@@ -135,26 +132,20 @@ const markBoundaryGesture = (input: {
 }
 
 function TimelineThinkingRow(props: {
-  reasoningHeading?: string
-  showReasoningSummaries: boolean
   routingActivity?: OmoRoutingEvent.OmoRoutingActivity
   startedAt?: number
 }) {
   const language = useLanguage()
-
   return (
     <div data-slot="session-turn-thinking">
       <ThinkingStatus
-        active={true}
+        active
         pendingMessage={undefined}
         parts={[]}
         label={props.routingActivity ? routingStatusLabel(props.routingActivity, language.t) : undefined}
         startedAt={props.routingActivity?.startedAt ?? props.startedAt}
-        details="elapsed"
+        details={props.routingActivity ? "elapsed" : undefined}
       />
-      <Show when={!props.showReasoningSummaries}>
-        <TextReveal text={props.reasoningHeading} class="session-turn-thinking-heading" travel={25} duration={700} />
-      </Show>
     </div>
   )
 }
@@ -998,32 +989,6 @@ export function MessageTimeline(props: {
   }
 
   const renderAssistantPartGroup = (row: Accessor<TimelineRowMap["AssistantPart"]>, onSizeChange?: () => void) => {
-    if (row().group.type === "context") {
-      const parts = createMemo(() => {
-        const group = row().group
-        if (group.type !== "context") return emptyTools
-        return group.refs
-          .map((ref) => getMsgPart(ref.messageID, ref.partID))
-          .filter((part): part is ToolPart => part?.type === "tool")
-      })
-      const contextOpenKey = () => `context:${row().group.key}`
-      const open = createMemo(() => {
-        return toolOpen[contextOpenKey()] === true
-      })
-
-      return (
-        <ContextToolGroup
-          parts={parts()}
-          open={open()}
-          onOpenChange={(value) => setToolOpen(contextOpenKey(), value)}
-          busy={
-            workingTurn(row().userMessageID) && lastAssistantGroupKey().get(row().userMessageID) === row().group.key
-          }
-          onSizeChange={onSizeChange}
-        />
-      )
-    }
-
     if (row().group.type === "edit") {
       const items = createMemo(() => {
         const group = row().group
@@ -1235,8 +1200,6 @@ export function MessageTimeline(props: {
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
               <TimelineThinkingRow
-                reasoningHeading={thinkingRow().reasoningHeading}
-                showReasoningSummaries={settings.general.showReasoningSummaries()}
                 routingActivity={thinkingRow().routingActivity}
                 startedAt={
                   thinkingRow().routingActivity?.startedAt ??

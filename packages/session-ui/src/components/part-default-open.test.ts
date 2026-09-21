@@ -41,8 +41,17 @@ describe("partDefaultOpen", () => {
     ).toBe(true)
   })
 
-  test("preserves shell defaults", () => {
+  test("shell is closed by default", () => {
+    expect(partDefaultOpen(tool("shell", {}))).toBe(false)
+    expect(partDefaultOpen(tool("bash", {}))).toBe(false)
+  })
+
+  test("shell opens only when the caller opts in", () => {
     expect(partDefaultOpen(tool("shell", {}), true, false)).toBe(true)
+  })
+
+  test("edit stays closed by default", () => {
+    expect(partDefaultOpen(tool("edit", { filediff: { additions: 1, deletions: 1 } }))).toBe(false)
   })
 })
 

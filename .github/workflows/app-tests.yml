@@ -64,7 +64,7 @@ jobs:
         working-directory: packages/ui
 
       - name: Tests (session-ui)
-        run: bun test
+        run: bun test --conditions=browser
         working-directory: packages/session-ui
 
       - name: Install the reproduction spec's browser

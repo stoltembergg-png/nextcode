@@ -59,7 +59,8 @@ test("expands and collapses a completed context group without overlap", async ({
     "prt_interaction_03_grep",
     "prt_interaction_04_list",
   ]
-  const group = `[data-timeline-part-ids="${ids.join(",")}"]`
+  const contextID = ids[0]!
+  const contextSelector = `[data-timeline-part-id="${contextID}"]`
   const followingID = "prt_interaction_context_following"
   await setupTimeline(page, {
     messages: [
@@ -75,15 +76,15 @@ test("expands and collapses a completed context group without overlap", async ({
     cpuRate: 4,
     seedHistory: true,
   })
-  const trigger = page.locator(`${group} [data-slot="collapsible-trigger"]`)
-  await waitForVisualSettle(page, [group, `[data-timeline-part-id="${followingID}"]`])
+  const trigger = page.locator(`${contextSelector} [data-slot="collapsible-trigger"]`)
+  await waitForVisualSettle(page, [contextSelector, `[data-timeline-part-id="${followingID}"]`])
   for (const [name, expanded] of [
     ["context-expand", true],
     ["context-collapse", false],
     ["context-reexpand", true],
   ] as const) {
     const regions = defineVisualRegions({
-      context: { selector: group, closest: '[data-timeline-row="AssistantPart"]' },
+      context: { selector: contextSelector, closest: '[data-timeline-row="AssistantPart"]' },
       following: {
         selector: `[data-timeline-part-id="${followingID}"]`,
         closest: '[data-timeline-row="AssistantPart"]',

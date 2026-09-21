@@ -37,12 +37,12 @@ test("appends context operations while the group is expanded", async ({ page }, 
     ],
     cpuRate: 4,
   })
-  const initialGroup = `[data-timeline-part-ids="${firstID}"]`
-  await page.locator(`${initialGroup} [data-slot="collapsible-trigger"]`).click()
-  await waitForVisualSettle(page, [initialGroup, `[data-timeline-part-id="${followingID}"]`])
+  const contextSelector = `[data-timeline-part-id="${firstID}"]`
+  await page.locator(`${contextSelector} [data-slot="collapsible-trigger"]`).click()
+  await waitForVisualSettle(page, [contextSelector, `[data-timeline-part-id="${followingID}"]`])
   const regions = defineVisualRegions({
     context: {
-      selector: '[data-timeline-part-ids^="prt_append_01_read"]',
+      selector: contextSelector,
       closest: '[data-timeline-row="AssistantPart"]',
     },
     following: { selector: `[data-timeline-part-id="${followingID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
@@ -72,14 +72,13 @@ test("appends context operations while the group is expanded", async ({ page }, 
       { perMarker: true },
     ),
   )
-  await expect(
-    page.locator(
-      '[data-timeline-part-ids="prt_append_01_read,prt_append_02_glob,prt_append_03_grep,prt_append_04_list"]',
-    ),
-  ).toBeVisible()
-  await expect(
-    page.locator('[data-timeline-part-ids^="prt_append_01_read"] [data-slot="collapsible-trigger"]'),
-  ).toHaveAttribute("aria-expanded", "true")
+  for (const id of ["prt_append_01_read", "prt_append_02_glob", "prt_append_03_grep", "prt_append_04_list"]) {
+    await expect(page.locator(`[data-timeline-part-id="${id}"]`)).toBeVisible()
+  }
+  await expect(page.locator(`${contextSelector} [data-slot="collapsible-trigger"]`)).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  )
 })
 
 test("splits and merges context groups when a middle text part changes", async ({ page }, testInfo) => {
@@ -105,10 +104,11 @@ test("splits and merges context groups when a middle text part changes", async (
     event("message.part.removed", { sessionID: "ses_timeline_stability", messageID: assistantID, partID: textID }),
     500,
   )
-  await expect(page.locator('[data-timeline-part-ids="prt_split_01_read,prt_split_03_glob"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-part-id="prt_split_01_read"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-part-id="prt_split_03_glob"]')).toBeVisible()
   await timeline.send(partUpdated(textPart(textID, "Boundary restored")), 500)
-  await expect(page.locator('[data-timeline-part-ids="prt_split_01_read"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-ids="prt_split_03_glob"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-part-id="prt_split_01_read"]')).toBeVisible()
+  await expect(page.locator('[data-timeline-part-id="prt_split_03_glob"]')).toBeVisible()
   const trace = await stopVisualProbe<keyof typeof regions>(page)
   await reportVisualStability(
     testInfo,
@@ -147,15 +147,12 @@ test("removing the first context member replaces the group once without overlapp
     ],
     cpuRate: 4,
   })
-  const original = page.locator(`[data-timeline-part-ids="${ids.join(",")}"]`)
-  const originalRowKey = await original.evaluate((element) =>
-    element.closest("[data-timeline-key]")?.getAttribute("data-timeline-key"),
-  )
-  await original.locator('[data-slot="collapsible-trigger"]').click()
-  await expect(original.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
+  const glob = page.locator(`[data-timeline-part-id="${ids[1]}"]`)
+  await glob.locator('[data-slot="collapsible-trigger"]').click()
+  await expect(glob.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
   const regions = defineVisualRegions({
     context: {
-      selector: '[data-timeline-part-ids*="prt_key_02_glob"]',
+      selector: `[data-timeline-part-id="${ids[1]}"]`,
       closest: '[data-timeline-row="AssistantPart"]',
     },
     following: { selector: `[data-timeline-part-id="${followingID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
@@ -180,13 +177,7 @@ test("removing the first context member replaces the group once without overlapp
       { type: "flow", regions: ["context", "following"] },
     ]),
   )
-  await expect(page.locator(`[data-timeline-part-ids="${ids.slice(1).join(",")}"]`)).toBeVisible()
-  expect(
-    await page
-      .locator(`[data-timeline-part-ids="${ids.slice(1).join(",")}"]`)
-      .evaluate((element) => element.closest("[data-timeline-key]")?.getAttribute("data-timeline-key")),
-  ).toBe(originalRowKey)
-  await expect(
-    page.locator(`[data-timeline-part-ids="${ids.slice(1).join(",")}"] [data-slot="collapsible-trigger"]`),
-  ).toHaveAttribute("aria-expanded", "true")
+  await expect(page.locator(`[data-timeline-part-id="${ids[1]}"]`)).toBeVisible()
+  await expect(page.locator(`[data-timeline-part-id="${ids[2]}"]`)).toBeVisible()
+  await expect(glob.locator('[data-slot="collapsible-trigger"]')).toHaveAttribute("aria-expanded", "true")
 })

@@ -1,9 +1,9 @@
-import { createEffect, createMemo, createSignal, on, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, Show, type JSX } from "solid-js"
 import { type AssistantMessage } from "@opencode-ai/sdk/v2"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
-import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { AnimatedNumber } from "@opencode-ai/ui/animated-number"
 import { AnimatedCountLabel } from "./tool-count-label"
+import { BasicTool } from "./basic-tool"
 
 function tokenTotal(message: AssistantMessage | undefined) {
   if (!message) return 0
@@ -31,6 +31,7 @@ export function ThinkingStatus(props: {
   active: boolean
   pendingMessage: AssistantMessage | undefined
   parts: readonly { type: string; tool?: string }[]
+  children?: JSX.Element
   label?: string
   startedAt?: number
   details?: "all" | "elapsed"
@@ -78,7 +79,13 @@ export function ThinkingStatus(props: {
     tick()
     const start = props.pendingMessage?.time.created
     if (typeof start !== "number") return 0
-    const diff = Date.now() - start
+    if (props.active) {
+      const diff = Date.now() - start
+      return diff > 0 ? Math.floor(diff / 1000) : 0
+    }
+    const completed = props.pendingMessage?.time.completed
+    if (typeof completed !== "number") return 0
+    const diff = completed - start
     return diff > 0 ? Math.floor(diff / 1000) : 0
   })
 
@@ -97,51 +104,69 @@ export function ThinkingStatus(props: {
   const showTokens = createMemo(() => tokensLabel().length > 0)
   const showElapsed = createMemo(() => elapsed() > 0)
   const showElapsedOnly = createMemo(() => props.details === "elapsed" && elapsedLabel().length > 0)
+  const title = () =>
+    props.label ?? (props.active ? i18n.t("ui.sessionTurn.status.thinking") : i18n.t("ui.sessionTurn.status.thought"))
+
+  const stats = () => {
+    if (props.details === "elapsed") {
+      if (!showElapsedOnly()) return
+      return (
+        <span data-slot="thinking-status-stats" data-active="true">
+          <span
+            data-slot="thinking-status-stat-elapsed"
+            data-active="true"
+            aria-label={i18n.t("ui.sessionTurn.thinking.elapsed")}
+          >
+            <span data-slot="thinking-status-stat-inner">{elapsedLabel()}</span>
+          </span>
+        </span>
+      )
+    }
+    if (!showDecisions() && !showTokens() && !showElapsed()) return
+    return (
+      <span data-slot="thinking-status-stats" data-active="true">
+        <Show when={showDecisions()}>
+          <span data-slot="thinking-status-stat-decisions" data-active="true">
+            <span data-slot="thinking-status-stat-inner">
+              <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
+            </span>
+          </span>
+        </Show>
+        <Show when={showDecisions() && showTokens()}>
+          <span data-slot="thinking-status-sep">·</span>
+        </Show>
+        <Show when={showTokens()}>
+          <span data-slot="thinking-status-stat-tokens" data-active="true">
+            <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
+          </span>
+        </Show>
+        <Show when={showTokens() && showElapsed()}>
+          <span data-slot="thinking-status-sep">·</span>
+        </Show>
+        <Show when={showElapsed()}>
+          <span data-slot="thinking-status-stat-elapsed" data-active="true">
+            <span data-slot="thinking-status-stat-inner">
+              <AnimatedNumber value={elapsed()} />
+              <span data-slot="thinking-status-stat-suffix">s</span>
+            </span>
+          </span>
+        </Show>
+      </span>
+    )
+  }
 
   return (
-    <div data-slot="thinking-status" data-active={props.active ? "true" : "false"}>
-      <span data-slot="thinking-status-label" aria-live="polite">
-        <TextShimmer text={props.label ?? i18n.t("ui.sessionTurn.status.thinking")} active={props.active} />
-      </span>
-      <Show when={props.active}>
-        <span data-slot="thinking-status-stats" data-active="true">
-          <Show when={showElapsedOnly()}>
-            <span data-slot="thinking-status-sep" aria-hidden="true">·</span>
-            <span data-slot="thinking-status-stat-elapsed" data-active="true" aria-label={i18n.t("ui.sessionTurn.thinking.elapsed")}>
-              <span data-slot="thinking-status-stat-inner">{elapsedLabel()}</span>
-            </span>
-          </Show>
-          <Show when={props.details !== "elapsed"}>
-          <Show when={showDecisions()}>
-            <span data-slot="thinking-status-stat-decisions" data-active="true">
-              <span data-slot="thinking-status-stat-inner">
-                <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
-              </span>
-            </span>
-          </Show>
-          <Show when={showDecisions() && showTokens()}>
-            <span data-slot="thinking-status-sep">·</span>
-          </Show>
-          <Show when={showTokens()}>
-            <span data-slot="thinking-status-stat-tokens" data-active="true">
-              <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
-            </span>
-          </Show>
-          <Show when={showTokens() && showElapsed()}>
-            <span data-slot="thinking-status-sep">·</span>
-          </Show>
-          <Show when={showElapsed()}>
-            <span data-slot="thinking-status-stat-elapsed" data-active="true">
-              <span data-slot="thinking-status-stat-inner">
-                <AnimatedNumber value={elapsed()} />
-                <span data-slot="thinking-status-stat-suffix">s</span>
-              </span>
-            </span>
-          </Show>
-          </Show>
-        </span>
-      </Show>
-    </div>
+    <BasicTool
+      icon="brain"
+      status={props.active ? "running" : "completed"}
+      allowOpenWhilePending
+      animated={props.children !== undefined}
+      trigger={{
+        title: title(),
+        action: stats(),
+      }}
+    >
+      {props.children}
+    </BasicTool>
   )
 }
-
