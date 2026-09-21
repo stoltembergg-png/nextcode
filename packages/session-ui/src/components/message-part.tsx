@@ -5,7 +5,6 @@ import {
   createSignal,
   For,
   Match,
-  onMount,
   Show,
   Switch,
   onCleanup,
@@ -64,7 +63,6 @@ import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
 import { partDefaultOpen } from "./part-default-open"
 import { summarizeShellCommand } from "./shell-command-summary"
-import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
 import { readPartText } from "./message-part-text"
 import { SessionProgressIndicatorV2 } from "../v2/components/session-progress-indicator-v2"
@@ -90,39 +88,6 @@ async function writeClipboard(text: string): Promise<boolean> {
   return clipboard.writeText(text).then(
     () => true,
     () => false,
-  )
-}
-
-function ShellSubmessage(props: { text: string; animate?: boolean }) {
-  let widthRef: HTMLSpanElement | undefined
-  let valueRef: HTMLSpanElement | undefined
-
-  onMount(() => {
-    if (!props.animate) return
-    requestAnimationFrame(() => {
-      if (widthRef) {
-        animate(widthRef, { width: "auto" }, { type: "spring", visualDuration: 0.25, bounce: 0 })
-      }
-      if (valueRef) {
-        animate(valueRef, { opacity: 1, filter: "blur(0px)" }, { duration: 0.32, ease: [0.16, 1, 0.3, 1] })
-      }
-    })
-  })
-
-  return (
-    <span data-component="shell-submessage" dir="ltr">
-      <span ref={widthRef} data-slot="shell-submessage-width" style={{ width: props.animate ? "0px" : undefined }}>
-        <span data-slot="basic-tool-tool-subtitle">
-          <span
-            ref={valueRef}
-            data-slot="shell-submessage-value"
-            style={props.animate ? { opacity: 0, filter: "blur(2px)" } : undefined}
-          >
-            {props.text}
-          </span>
-        </span>
-      </span>
-    </span>
   )
 }
 
@@ -527,7 +492,7 @@ export function getToolInfo(
     case "shell":
       return {
         icon: "console",
-        title: i18n.t("ui.tool.shell"),
+        title: i18n.t("ui.tool.shell.ran"),
         subtitle: input.command,
       }
     case "edit":
@@ -1983,18 +1948,9 @@ ToolRegistry.register({
   name: "shell",
   render(props) {
     const i18n = useI18n()
-    const pending = () => props.status === "pending" || props.status === "running"
-    const sawPending = pending()
     const command = createMemo(() => props.input.command ?? props.metadata.command ?? "")
-    // There is no upstream shell summary, so the collapsed row shows a translated
-    // action derived from the command instead of dumping the raw command. The full
-    // command and output stay in the expanded body.
     const summary = createMemo(() => summarizeShellCommand(command()))
-    const label = createMemo(() => {
-      const value = summary()
-      return value ? i18n.t(value.key, value.params) : i18n.t("ui.tool.shell")
-    })
-    const target = createMemo(() => summary()?.target)
+    const target = createMemo(() => summary()?.target ?? command())
     const text = createMemo(() => {
       const cmd = command()
       const out = stripAnsi(props.output || props.metadata.output || "").replace(/\r\n?/g, "\n")
@@ -2016,21 +1972,10 @@ ToolRegistry.register({
         {...props}
         icon="console"
         allowOpenWhilePending
-        trigger={(open) => (
-          <div data-slot="basic-tool-tool-info-structured">
-            <span data-slot="basic-tool-tool-indicator" data-component="shell-tool-icon">
-              <Icon name="console" size="small" />
-            </span>
-            <div data-slot="basic-tool-tool-info-main">
-              <span data-slot="basic-tool-tool-title" data-component="shell-tool-action">
-                <TextShimmer text={label()} active={pending()} />
-              </span>
-              <Show when={!open() && target()}>
-                {(value) => <ShellSubmessage text={value()} animate={sawPending} />}
-              </Show>
-            </div>
-          </div>
-        )}
+        trigger={{
+          title: i18n.t("ui.tool.shell.ran"),
+          subtitle: target(),
+        }}
       >
         <div data-component="bash-output" dir="ltr">
           <div data-slot="bash-copy">
