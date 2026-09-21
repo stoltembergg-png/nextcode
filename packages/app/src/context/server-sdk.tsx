@@ -311,11 +311,12 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
-        emitter.emit("global", {
+        const disconnected: ServerEvent = {
           id: "server.disconnected",
           type: "server.disconnected",
           properties: {},
-        })
+        }
+        if (enqueueServerEvent(queue, { directory: "global", payload: disconnected })) schedule()
         await wait(RECONNECT_DELAY_MS)
       }
     })().finally(() => {
