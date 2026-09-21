@@ -75,13 +75,12 @@ Não havia pasta `docs/` até este arquivo. O que existe é *forte* e está em `
 
 ### CI
 
-Cinco workflows de produto mais o smoke Linux. **Nenhum dispara em `pull_request`.** Windows/macOS shell só em `push` para `tauri-shell`; o Linux smoke também cobre `dev` e este branch:
+Cinco workflows de produto. **Nenhum dispara em `pull_request`.** Windows/macOS shell só em `push` para `tauri-shell`:
 
 | Workflow | Trigger | O que faz |
 | --- | --- | --- |
 | `tauri-shell-windows.yml` | `tauri-shell` + paths | Sidecar cross-compile + smoke Windows (~40 s, asserts em log) |
 | `tauri-shell-macos.yml` | `tauri-shell` + paths (sem `packages/opencode/**`) | Idem macOS |
-| `tauri-shell-linux.yml` | `tauri-shell` / `dev` / this branch + paths | Sidecar `opencode-linux-x64` + AppImage extract smoke |
 | `app-tests.yml` | `tauri-shell` | typecheck app/ui/session-ui; `bun test` do **app com `continue-on-error: true`**; 1 spec Playwright de 63 |
 | `codegen-check.yml` | `tauri-shell` | `bun run --cwd packages/client check:generated` |
 | `tauri-release.yml` | tag `v*` / `workflow_dispatch` | Sidecar + mirror llama.cpp + NSIS/dmg/AppImage + minisign |
