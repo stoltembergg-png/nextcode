@@ -69,7 +69,13 @@ export function ThinkingStatus(props: {
     tick()
     const start = props.pendingMessage?.time.created
     if (typeof start !== "number") return 0
-    const diff = Date.now() - start
+    if (props.active) {
+      const diff = Date.now() - start
+      return diff > 0 ? Math.floor(diff / 1000) : 0
+    }
+    const completed = props.pendingMessage?.time.completed
+    if (typeof completed !== "number") return 0
+    const diff = completed - start
     return diff > 0 ? Math.floor(diff / 1000) : 0
   })
 
