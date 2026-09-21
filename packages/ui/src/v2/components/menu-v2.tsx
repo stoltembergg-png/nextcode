@@ -182,10 +182,6 @@ function MenuV2Content(props: ComponentProps<typeof DropdownMenu.Content>) {
   )
 }
 
-function MenuV2Root(props: ComponentProps<typeof DropdownMenu>) {
-  return <DropdownMenu {...props} />
-}
-
 function MenuV2ContextRoot(props: ComponentProps<typeof ContextMenu>) {
   return <ContextMenu {...props} />
 }
@@ -207,7 +203,7 @@ const MenuV2Context = Object.assign(MenuV2ContextRoot, {
   Content: MenuV2ContextContent,
 })
 
-export const MenuV2 = Object.assign(MenuV2Root, {
+export const MenuV2 = Object.assign(DropdownMenu, {
   Trigger: DropdownMenu.Trigger,
   Portal: DropdownMenu.Portal,
   Content: MenuV2Content,
