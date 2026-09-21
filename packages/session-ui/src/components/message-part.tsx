@@ -1383,7 +1383,10 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
                   defaultOpen={props.defaultOpen}
                   open={controlledOpen()}
                   onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
-                  subtitle={taskSubtitle()}
+                  subtitle={
+                    taskSubtitle() ??
+                    getToolInfo(part().tool, input(), partMetadata()).subtitle
+                  }
                   href={taskHref()}
                   onSubtitleClick={(event) => {
                     if (!data.navigateToSession) return
