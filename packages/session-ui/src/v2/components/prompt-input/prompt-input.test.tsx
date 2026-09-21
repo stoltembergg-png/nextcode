@@ -1,10 +1,32 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, mock, test } from "bun:test"
 import { render } from "solid-js/web"
 import { I18nProvider, type UiI18n } from "@opencode-ai/ui/context/i18n"
 import { dict as en } from "@opencode-ai/ui/i18n/en"
 import { createPromptInputV2InteractionState } from "./machine"
-import { PromptInputV2 } from "./index"
 import type { PromptInputV2Interaction } from "./interaction"
+
+mock.module("@opencode-ai/ui/v2/menu-v2", async () => {
+  const { DropdownMenu } = await import("@kobalte/core/dropdown-menu")
+  return {
+    MenuV2: Object.assign(DropdownMenu, {
+      Trigger: DropdownMenu.Trigger,
+      Portal: DropdownMenu.Portal,
+      Content: DropdownMenu.Content,
+      Item: DropdownMenu.Item,
+      CheckboxItem: DropdownMenu.CheckboxItem,
+      RadioGroup: DropdownMenu.RadioGroup,
+      RadioItem: DropdownMenu.RadioItem,
+      Group: DropdownMenu.Group,
+      GroupLabel: DropdownMenu.GroupLabel,
+      Separator: DropdownMenu.Separator,
+      Sub: DropdownMenu.Sub,
+      SubTrigger: DropdownMenu.SubTrigger,
+      SubContent: DropdownMenu.SubContent,
+    }),
+  }
+})
+
+const { PromptInputV2 } = await import("./index")
 
 const i18n: UiI18n = {
   locale: () => "en",
