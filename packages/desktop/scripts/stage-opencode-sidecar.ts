@@ -4,7 +4,8 @@
 // target. On Linux the Bun ELF cannot sit in usr/bin: linuxdeploy's gtk plugin
 // runs ldd/patchelf on every ELF there and aborts. The externalBin slot is a
 // shell wrapper; the real binary is copied to binaries/opencode-cli-real and
-// packaged at /usr/share/opencode/opencode-cli via tauri.linux.conf.json.
+// packaged at /usr/share/opencode/opencode-cli via linux.appimage.files
+// (and linux.deb.files). linux.deb.files does not copy into the AppImage.
 
 import { $ } from "bun"
 import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
