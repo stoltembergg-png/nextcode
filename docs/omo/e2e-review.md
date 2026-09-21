@@ -78,11 +78,12 @@ Scope: `packages/app/e2e/user-story/omo-routing-feedback.spec.ts`.
 | Phase, source, and stale behavior | The story covers `analyzing`, SemIf `selected`, `delegating`, `cleared`, deterministic and explicit selection, and a lower sequence after the clear. |
 | Concurrent isolation | An event for the inactive session leaves the active tab generic; its exact session tab then shows only its own label. The latest `updatedAt` tool call wins, and clearing it reveals the older call. |
 | Cleanup, cancellation, eviction, and reconnect | An aborted assistant event clears the routing label while preserving generic busy thinking; a separate idle event removes the row. Forty subsequent idle-session events evict inactive routing activity from the real 40-entry cache before the target tab is activated. A clean stream close waits for the next SSE connection, verifies reconnect cleanup, and verifies a newly acknowledged event is rendered. |
-| No wall-clock coordination | The spec contains no `waitForTimeout`, `setTimeout`, sleeps, polling loops, retries, or per-test timeout overrides; it uses SSE acknowledgements, `waitForConnection`, and web-first assertions. |
+| No wall-clock coordination | The spec contains no `waitForTimeout`, `setTimeout`, sleeps, polling loops, Playwright/action retries, or per-test timeout overrides; it uses SSE acknowledgements, `waitForConnection`, and web-first assertions. Its `retry: 20` transport option is only the deterministic SSE reconnect interval. |
 
 With the Bun bin directory prepended to `PATH`, the repeated browser command
 `bun x playwright test e2e/user-story/omo-routing-feedback.spec.ts --repeat-each=3 --reporter=line`
-passed all 27 runs on 2026-09-21, with no retries. `bun run typecheck:e2e` and
+passed all 27 runs on 2026-09-21, with Playwright configured for no test
+retries. `bun run typecheck:e2e` and
 `git diff --check` also passed. The browser evidence includes the corrected
 init-script fixture inputs for both `directory` and `server`, so its two-tab
 session-isolation assertion runs against real, distinct tab routes.
