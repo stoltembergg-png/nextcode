@@ -29,6 +29,7 @@ import {
   type EditToolItem,
   type UserActions,
 } from "@opencode-ai/session-ui/message-part"
+import { semifFooterForPart, semifFooterLabel } from "@opencode-ai/session-ui/semif-footer"
 import { DiffChanges } from "@opencode-ai/ui/diff-changes"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -1017,6 +1018,22 @@ export function MessageTimeline(props: {
     return end - message.time.created
   }
 
+  const turnParts = (userMessageID: string) => {
+    const messages = assistantMessagesByParent().get(userMessageID) ?? emptyAssistantMessages
+    return messages.flatMap((message) => getMsgParts(message.id))
+  }
+
+  const semifFooter = (userMessageID: string, partID: string) => {
+    const copyPartID = assistantCopyPartID(userMessageID)
+    const phrase = semifFooterLabel({
+      parts: turnParts(userMessageID),
+      locale: language.intl(),
+      t: language.t,
+      plural: language.plural,
+    })
+    return semifFooterForPart(copyPartID, partID, phrase)
+  }
+
   const assistantCopyPartID = (userMessageID: string) => {
     if (workingTurn(userMessageID)) return null
     const messages = assistantMessagesByParent().get(userMessageID) ?? emptyAssistantMessages
@@ -1090,6 +1107,7 @@ export function MessageTimeline(props: {
                 message={message()}
                 showAssistantCopyPartID={assistantCopyPartID(row().userMessageID)}
                 turnDurationMs={turnDurationMs(row().userMessageID)}
+                semifFooter={semifFooter(row().userMessageID, part().id)}
                 useV2Actions={settings.general.newLayoutDesigns()}
                 defaultOpen={defaultOpen()}
                 toolOpen={toolOpen[part().id] ?? defaultOpen()}
