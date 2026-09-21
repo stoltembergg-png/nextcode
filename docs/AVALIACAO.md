@@ -230,7 +230,7 @@ Impacto é no usuário real (disco e replay de sessão longa), não em estética
 1. Sanitizar `store_*` (`name` sem `..` / separadores).
 2. CSP mínimo no webview; `withGlobalTauri` só se ainda for necessário para o self-test — e então apagar o self-test.
 3. Allowlist de scheme nos `href` do menu nativo, igual a `open_external`.
-4. `runDesktopMenuAction` de verdade (o menu Windows em `packages/app/src/components/windows-app-menu.tsx` hoje no-op).
+4. Caption Linux no titlebar (já há `runDesktopMenuAction` via `getCurrentWindow()`).
 5. `readClipboardImage` e, se o produto promete, `installCli` / WSL.
 6. Teste de contrato: `ElectronAPI` vs commands registrados vs shim.
 
