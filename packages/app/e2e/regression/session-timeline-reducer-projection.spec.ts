@@ -23,10 +23,17 @@ test("groups singleton and separated context operations at correct boundaries", 
   ]
   await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
 
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_01_read"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_03_glob,prt_boundary_04_grep"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_06_list"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-row="AssistantPart"]')).toHaveCount(5)
+  for (const id of [
+    "prt_boundary_01_read",
+    "prt_boundary_02_text",
+    "prt_boundary_03_glob",
+    "prt_boundary_04_grep",
+    "prt_boundary_05_shell",
+    "prt_boundary_06_list",
+  ]) {
+    await expect(page.locator(`[data-timeline-part-id="${id}"]`)).toBeVisible()
+  }
+  await expect(page.locator('[data-timeline-row="AssistantPart"]')).toHaveCount(6)
 })
 
 test("reducer-hardening: converges when idle arrives before final part and message completion", async ({ page }) => {

@@ -2053,7 +2053,7 @@ function Playground() {
                           messages={state.messages}
                           active={false}
                           showReasoningSummaries={true}
-                          shellToolDefaultOpen={true}
+                          shellToolDefaultOpen={false}
                           editToolDefaultOpen={true}
                           classes={{
                             root: "min-w-0 w-full relative",

@@ -201,3 +201,14 @@ describe("shell action labels", () => {
     expect(resolve(`bun test src/components`)).toBe("Running tests \u00B7 src/components")
   })
 })
+
+test("transcript activity verbs exist in English source", () => {
+  expect(en["ui.sessionTurn.status.thinking"]).toBe("Thinking")
+  expect(en["ui.sessionTurn.status.thought"]).toBe("Thought")
+  expect(en["ui.tool.shell.ran"]).toBe("Ran")
+})
+
+test("English Ran verb is the shell activity title", () => {
+  expect(en["ui.tool.shell.ran"]).toBe("Ran")
+  expect(en["ui.tool.shell.ran"]).not.toBe(en["ui.tool.shell"])
+})

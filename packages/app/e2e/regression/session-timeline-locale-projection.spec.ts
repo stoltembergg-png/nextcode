@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test"
 import { assistantMessage, setupTimeline, toolPart, userMessage } from "../performance/timeline-stability/fixture"
 
 for (const profile of [
-  { locale: "de", label: "Erkundung abgeschlossen" },
-  { locale: "ar", label: "تم الاستكشاف" },
+  { locale: "de", readLabel: "Lesen" },
+  { locale: "ar", readLabel: "قراءة" },
 ] as const) {
   test(`projects translated context status in ${profile.locale}`, async ({ page }) => {
     const ids = [`prt_locale_${profile.locale}_01_read`, `prt_locale_${profile.locale}_02_glob`]
@@ -18,8 +18,8 @@ for (const profile of [
       locale: profile.locale,
     })
 
-    const group = page.locator(`[data-timeline-part-ids="${ids.join(",")}"]`)
-    await expect(group.locator('[data-component="tool-status-title"]')).toHaveAttribute("aria-label", profile.label)
+    const read = page.locator(`[data-timeline-part-id="${ids[0]}"]`)
+    await expect(read.locator('[data-slot="basic-tool-tool-title"]')).toContainText(profile.readLabel)
     await expect(page.locator("html")).toHaveAttribute("lang", profile.locale)
   })
 }

@@ -48,10 +48,11 @@ test.describe("session timeline projection", () => {
     ]
     await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
 
-    await expect(
-      page.locator('[data-timeline-part-ids="prt_01_read,prt_02_glob,prt_03_grep,prt_04_list"]'),
-    ).toBeVisible()
     for (const id of [
+      "prt_01_read",
+      "prt_02_glob",
+      "prt_03_grep",
+      "prt_04_list",
       "prt_webfetch",
       "prt_websearch",
       "prt_task",

@@ -182,10 +182,11 @@ test.describe("timeline adverse visual stability", () => {
       cpuRate: 4,
       seedHistory: true,
     })
-    const group = `[data-timeline-part-ids="${contextIDs.join(",")}"]`
+    const contextID = contextIDs[0]!
+    const contextSelector = `[data-timeline-part-id="${contextID}"]`
     const regions = defineVisualRegions({
       shell: { selector: `[data-timeline-part-id="${shellID}"]`, closest: '[data-timeline-row="AssistantPart"]' },
-      context: { selector: group, closest: '[data-timeline-row="AssistantPart"]' },
+      context: { selector: contextSelector, closest: '[data-timeline-row="AssistantPart"]' },
       following: {
         selector: `[data-timeline-part-id="${followingID}"]`,
         closest: '[data-timeline-row="AssistantPart"]',

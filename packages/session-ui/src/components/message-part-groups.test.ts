@@ -59,15 +59,23 @@ describe("groupParts edits", () => {
     expect(groups[0]!.type).toBe("edit")
   })
 
-  test("keeps grouping context tools", () => {
+  test("does not group consecutive read grep list glob tools", () => {
     const groups = groupParts([
       { messageID: "message", part: toolPart("read", "part_0") },
       { messageID: "message", part: toolPart("grep", "part_1") },
-      { messageID: "message", part: editPart("part_2", "src/dv.ts") },
-      { messageID: "message", part: editPart("part_3", "src/dv.ts") },
+      { messageID: "message", part: toolPart("list", "part_2") },
+      { messageID: "message", part: toolPart("glob", "part_3") },
+      { messageID: "message", part: editPart("part_4", "src/dv.ts") },
+      { messageID: "message", part: editPart("part_5", "src/dv.ts") },
     ])
 
-    expect(groups.map((group) => group.type)).toEqual(["context", "edit"])
+    expect(groups.map((group) => group.type)).toEqual(["part", "part", "part", "part", "edit"])
+    expect(groups.slice(0, 4).map((group) => (group.type === "part" ? group.ref.partID : ""))).toEqual([
+      "part_0",
+      "part_1",
+      "part_2",
+      "part_3",
+    ])
   })
 
   test("sameGroups treats equal edit runs as equal", () => {

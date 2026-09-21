@@ -630,41 +630,6 @@
   }
 }
 
-[data-component="context-tool-group-trigger"] {
-  width: 100%;
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0px;
-  cursor: default;
-
-  [data-slot="context-tool-group-title"] {
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
-  [data-slot="collapsible-arrow"] {
-    color: var(--icon-weaker);
-    cursor: pointer;
-  }
-}
-
-[data-component="context-tool-group-list"] {
-  padding-top: 0;
-  padding-right: 0;
-  padding-bottom: 0;
-  padding-left: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-
-  [data-slot="context-tool-group-item"] {
-    min-width: 0;
-    padding: 0;
-  }
-}
-
 /* Consecutive edits to one file collapse into a compact, muted card. The row
    stays quiet and the file name plus combined counts carry the meaning. */
 [data-component="edit-tool-group-trigger"] {

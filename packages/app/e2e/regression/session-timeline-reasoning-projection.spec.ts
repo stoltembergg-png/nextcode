@@ -16,16 +16,16 @@ const profiles = [
     summaries: false,
     reasoning: "## Inspecting stability",
     other: false,
-    thinking: true,
-    body: false,
+    thinking: false,
+    body: true,
   },
   {
     name: "summaries off with visible tool",
     summaries: false,
     reasoning: "## Inspecting stability",
     other: true,
-    thinking: true,
-    body: false,
+    thinking: false,
+    body: true,
   },
   { name: "summaries on no content", summaries: true, reasoning: "", other: false, thinking: true, body: false },
   {
@@ -49,7 +49,7 @@ const profiles = [
     summaries: true,
     reasoning: "",
     other: true,
-    thinking: false,
+    thinking: true,
     body: false,
   },
 ] as const
@@ -71,9 +71,6 @@ for (const profile of profiles) {
 
     await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(profile.thinking ? 1 : 0)
     await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(profile.body ? 1 : 0)
-    if (!profile.summaries && profile.reasoning.trim()) {
-      await expect(page.getByText("Inspecting stability", { exact: true })).toBeVisible()
-    }
   })
 }
 
