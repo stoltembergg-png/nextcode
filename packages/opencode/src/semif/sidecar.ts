@@ -82,6 +82,8 @@ const isHealthy = (url: string): Effect.Effect<boolean, never, HttpClient.HttpCl
     return response !== undefined && response.status === 200
   })
 
+export const health = (url: string): Effect.Effect<boolean, never, HttpClient.HttpClient> => isHealthy(url)
+
 const readProps = (url: string): Effect.Effect<unknown, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient

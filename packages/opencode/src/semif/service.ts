@@ -205,6 +205,26 @@ const layer = Layer.effect(
       }
     })
 
+    const dropHandle = (handle: SemifSidecar.Handle) =>
+      Effect.gen(function* () {
+        yield* SemifSidecar.dispose(handle)
+        SemifScoring.clearCaches()
+        yield* Ref.update(state, (value) => ({
+          ...value,
+          status: "offline" as SemifStatus,
+          handle: undefined,
+          error: undefined,
+        }))
+      })
+
+    const dropHandleIfDead = Effect.gen(function* () {
+      const current = yield* Ref.get(state)
+      if (!current.handle) return
+      const alive = yield* provideSidecar(SemifSidecar.health(current.handle.url))
+      if (alive) return
+      yield* dropHandle(current.handle)
+    })
+
     const dropHandleIfStale = Effect.gen(function* () {
       const loaded = yield* load
       const current = yield* Ref.get(state)
@@ -216,18 +236,12 @@ const layer = Layer.effect(
         (loaded.modelPath !== undefined && current.handle.modelPath !== loaded.modelPath) ||
         current.handle.nGpuLayers !== expectedNgl
       if (!stale) return
-      yield* SemifSidecar.dispose(current.handle)
-      SemifScoring.clearCaches()
-      yield* Ref.update(state, (value) => ({
-        ...value,
-        status: "offline" as SemifStatus,
-        handle: undefined,
-        error: undefined,
-      }))
+      yield* dropHandle(current.handle)
     })
 
     const snapshot = Effect.gen(function* () {
       yield* dropHandleIfStale
+      yield* dropHandleIfDead
       const loaded = yield* load
       const current = yield* Ref.get(state)
       const base = {
@@ -462,6 +476,7 @@ const layer = Layer.effect(
       yield* ensureHipRuntime
       const rocm = yield* ensureRocmRuntime
       yield* dropHandleIfStale
+      yield* dropHandleIfDead
       const current = yield* Ref.get(state)
       if (current.handle) return current.handle
       const refreshed = yield* load
