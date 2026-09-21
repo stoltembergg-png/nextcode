@@ -5,8 +5,9 @@
 Replace the Electron shell of `packages/desktop` with a Tauri v2 shell while
 keeping every user-visible feature and leaving the application UI byte-identical.
 
-Scope is **Windows and macOS**. Linux desktop packaging is dropped from this
-migration (see [Non-goals](#non-goals)).
+Scope is **Windows, macOS, and Linux**. Linux first ship is an x86_64 AppImage
+(see [Linux first ship](#linux-first-ship)). `.deb` / `.rpm` / aarch64 desktop
+packaging stay out of this migration.
 
 Drivers, in priority order:
 
@@ -16,7 +17,17 @@ Drivers, in priority order:
 
 The UI must not be redesigned. `packages/app`, `packages/ui` and
 `packages/session-ui` are out of scope for edits; engine-level rasterization
-differences between WebView2 (Windows) and WKWebView (macOS) are accepted.
+differences between WebView2 (Windows), WKWebView (macOS), and WebKitGTK (Linux)
+are accepted.
+
+### Linux first ship
+
+Linux desktop is in product scope as an **x86_64 AppImage** on Ubuntu 22.04+ /
+glibc. CI builds on `ubuntu-24.04` with WebKitGTK 4.1. Caption buttons live in
+the Solid titlebar (do not enable `tauri-plugin-decorum` on Linux). SemIf vendors
+the CPU `llama-server` archive; Vulkan/HIP stay on-demand at runtime. Do not set
+`LD_LIBRARY_PATH`. Design: [`docs/superpowers/specs/2026-09-21-linux-desktop-design.md`](../docs/superpowers/specs/2026-09-21-linux-desktop-design.md).
+`.deb`, `.rpm`, Snap, Flatpak, and `aarch64-unknown-linux-gnu` are not first ship.
 
 ## Why Tauri 2 (vs Electron)
 
@@ -55,9 +66,9 @@ checklist instead of a rewrite.
 - **P2 — feature parity, slice by slice**: pickers/permission tokens/opener; drafts (sqlite
   + blobs) with window state and crash recovery; native menus + i18n; title bar,
   background and zoom — each verified against the Electron behavior.
-- **P4 — packaging and release**: NSIS + dmg bundles, `tauri-plugin-log` with
+- **P4 — packaging and release**: NSIS + dmg + AppImage bundles, `tauri-plugin-log` with
   `export_debug_logs`, and a release pipeline that cross-compiles the sidecar on Ubuntu and
-  publishes a merged, minisign-signed `latest.json` for both platforms (live at `v0.0.2`).
+  publishes a merged, minisign-signed `latest.json` for Windows, macOS, and Linux (live at `v0.0.2`).
 - **Cleanup**: the repository was trimmed to the desktop product — dead release/bot
   scripts, orphaned `sst-env` shims, unused workflows, translated README mirrors and cloud
   infrastructure leftovers are gone.
@@ -172,7 +183,8 @@ Rewrite instead of port:
 - tauri-specta bindings → the `window.api` shim.
 - `tauri-plugin-decorum` → native `titleBarStyle: Overlay` or own caption buttons;
   re-evaluate whether a third-party titlebar plugin is needed at all.
-- All Linux display/windowing code (out of scope).
+- Electron Linux display/windowing code (do not revive the Electron `.desktop` as
+  the Tauri source of truth; AppImage first ship is specified separately).
 - Git `[patch.crates-io]` pins and pinned crate versions; pin to current stable.
 - The separate loading window (the current shell renders an inline splash; keep
   that unless a spike proves a native window is necessary).
@@ -713,7 +725,7 @@ Rules:
 ## Non-goals
 
 - Redesigning, restyling or restructuring any UI.
-- Supporting Linux desktop builds in this migration.
+- Shipping `.deb` / `.rpm` / Snap / Flatpak or Linux aarch64 desktop.
 - Porting the opencode server to Rust.
 - Removing the Electron shell during this migration; both exist side by side.
 - Importing or migrating user data automatically beyond the documented import
