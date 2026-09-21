@@ -2,7 +2,7 @@
   <img src="packages/identity/wordmark.png" width="88" alt="NextCode" />
 </p>
 
-<p align="center">Desktop AI coding agent for Windows and macOS.</p>
+<p align="center">Desktop AI coding agent for Windows, macOS, and Linux.</p>
 
 <p align="center">
   <a href="specs/tauri-migration.md">Tauri 2 shell</a> ·
@@ -14,7 +14,7 @@
 
 NextCode is a desktop app around the **NextCode** engine: sessions, agents, tools and
 terminals in a native window. The shell is [Tauri 2](https://tauri.app) — a Rust host plus
-the operating system webview (WebView2 on Windows, WKWebView on macOS) — while the engine
+the operating system webview (WebView2 on Windows, WKWebView on macOS, WebKitGTK 4.1 on Linux) — while the engine
 and the UI come from the NextCode codebase unchanged. The migration from the Electron shell
 is documented in [`specs/tauri-migration.md`](specs/tauri-migration.md).
 
@@ -25,6 +25,7 @@ Download the latest installer from
 
 - **Windows 10/11 (x64)** — `NextCode_<version>_x64-setup.exe` (NSIS, per-user install)
 - **macOS (Apple Silicon)** — `NextCode_<version>_aarch64.dmg`
+- **Linux (x86_64)** — `NextCode_<version>_amd64.AppImage` (Ubuntu 22.04+ / glibc)
 
 The installers are **not code-signed yet**: Windows SmartScreen asks for
 _More info → Run anyway_, and macOS wants right-click → _Open_ (or System Settings →
@@ -45,7 +46,7 @@ with `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Prerequisites: [Bun](https://bun.sh) `1.3.14` (pinned in `packageManager`), Rust stable, and
 the platform toolchain (Visual Studio Build Tools + WebView2 on Windows; Xcode Command Line
-Tools on macOS).
+Tools on macOS; `libwebkit2gtk-4.1-dev` on Linux).
 
 ```bash
 bun install
@@ -55,9 +56,9 @@ bun run predev:tauri   # stages the compiled server sidecar + builds src-tauri/w
 bun run tauri dev      # runs the desktop shell
 ```
 
-`bun run tauri build` produces the NSIS / dmg bundle, and
+`bun run tauri build` produces the NSIS / dmg / AppImage bundle, and
 [`.github/workflows/tauri-release.yml`](.github/workflows/tauri-release.yml) builds, signs
-and publishes both platforms from a `v*` tag.
+and publishes all three platforms from a `v*` tag.
 
 ## Repository layout
 

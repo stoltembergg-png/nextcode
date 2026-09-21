@@ -651,6 +651,7 @@ const controlledSemifStatus: SemifInfo = {
   backendRequested: "cpu" as const,
   backendFallback: false,
   systemRuntimeMissing: false,
+  routing: { requested: "off", effective: "off" },
   choices: [],
   host: "127.0.0.1",
   port: 8817,
@@ -664,6 +665,7 @@ const controlledSemif = Layer.succeed(
     start: () => Effect.succeed(controlledSemifStatus),
     acquire: () => Effect.succeed(controlledSemifStatus),
     decide: () => Effect.die(new Error("SemIf is disabled in the packaged smoke")),
+    rememberRouting: () => Effect.void,
     dispose: () => Effect.void,
   }),
 )

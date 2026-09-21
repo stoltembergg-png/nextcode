@@ -270,21 +270,36 @@ O SemIf deixou de ser plugin externo e passou a ser **recurso nativo do servidor
 - **Runtime co-localizado**: o `llama-server` do llama.cpp carrega os backends ggml **do diretório do
   executável**; `PATH` e `GGML_BACKEND_PATH` não bastam. Por isso o serviço materializa
   `<data>/semif/runtime/<key>/` com o launcher + todas as libs (hardlink quando possível) e spawna de lá.
+- **Backend**: `semif.backend` default `auto` (`cpu | cuda | hip | vulkan`); sem picker nem SDK extra.
+  No `auto`, usa HIP quando o gfx está na matriz TheRock/ROCm; senão, em Windows/Ubuntu x64, descarrega
+  o `llama-server` Vulkan pinado. O sidecar passa `-ngl 99` nesses backends. Polaris (RX 580) é o caso
+  motivador. `hip` explícito continua a reportar `gpu_unsupported` (sem pivot silencioso para Vulkan).
+  Sem o loader Vulkan do driver (`vulkan-1.dll` / `libvulkan.so.1`), o status fica em CPU com
+  `missing_vulkan_runtime`. Falha ao subir o sidecar continua `failed`, como no HIP.
 - **Modelo**: pinado em `manifest.ts` (LFM2-350M Q4_K_M, 229.309.376 bytes, SHA256 verificado), baixado
   em `<data>/semif/models/<sha256[:12]>/`, parcial em `<cache>/semif/downloads/<sha256>.part`, `Range`
   com retomada e rename atômico. Política `download: auto | manual | never`.
 - **Ciclo de vida**: `mode: auto` dispara o warm-up após o boot (não bloqueante); `lazy` prepara na
-  primeira decisão; `off` desabilita. O sidecar **adota** um servidor já saudável com o mesmo modelo,
-  usa `port+1..+10` quando a porta está ocupada e mata somente o que ele mesmo spawnou.
+  primeira decisão; `off` desabilita. O sidecar **adota** um servidor já saudável com o mesmo modelo
+  (e a mesma contagem de camadas GPU quando `/props` a anuncia), usa `port+1..+10` quando a porta está
+  ocupada e mata somente o que ele mesmo spawnou.
 - **Tools**: `semif_status` e `semif_decide`; quando o modelo ainda não está pronto, `semif_decide`
   devolve estado + progresso e dispara a preparação em background (nunca bloqueia minutos).
 - **UI**: a aba lê `GET /semif/status` (polling de 1,5 s só em estados transitórios) e grava o modo no
   **config global** (`config.semif.mode`), não mais no config do projeto.
+
+### Routing (2026-09-21)
+
+`semif.routing`: `off` (default) | `assist` | `shadow` | `route` | `authoritative`.
+Only off/assist/shadow execute. route/authoritative are stored and run as shadow
+(`mode_not_shipped`). SemIf never blocks Session V2. Calibration metrics live in
+`src/semif/calibration.ts` and do not rewrite sidecar probabilities into confidence.
 
 ### Pendências conhecidas
 
 1. **macOS**: validar num smoke real a co-localização/assinatura do launcher + dylibs (hardlink preserva
    a assinatura; o fallback de cópia pode perder xattrs).
 2. **Progresso**: a UI usa polling; um evento de status dedicado (schema + bus) é a evolução natural.
-3. **Roadmap**: GC de `<data>/semif/runtime/<key>` antigos e variantes CUDA/Vulkan opcionais.
+3. **Roadmap**: GC de `<data>/semif/runtime/<key>` antigos. CUDA continua opcional; Vulkan já está no
+   `auto` (Windows/Ubuntu x64). `route` / `authoritative` ainda não guiam o Session V2.
 

@@ -18,17 +18,6 @@ describe("semif hip runtime", () => {
     const isZip = process.platform === "win32"
     const cpu = path.join("/bundle", stagedServerName(triple, "cpu", isZip))
     const inventory = { amd: true, nvidia: false, amdGfx: "gfx803" }
-    if (process.platform === "win32") {
-      expect(
-        shouldFetch({
-          requested: "hip",
-          serverPath: cpu,
-          env: { [SERVER_ENV]: cpu },
-          inventory,
-        }),
-      ).toBe(false)
-      return
-    }
     expect(
       shouldFetch({
         requested: "hip",
@@ -36,7 +25,15 @@ describe("semif hip runtime", () => {
         env: { [SERVER_ENV]: cpu },
         inventory,
       }),
-    ).toBe(true)
+    ).toBe(false)
+    expect(
+      shouldFetch({
+        requested: "auto",
+        serverPath: cpu,
+        env: { [SERVER_ENV]: cpu },
+        inventory,
+      }),
+    ).toBe(false)
   })
 
   test("shouldFetch is false for cpu preference and true for hip without vendored binary", () => {

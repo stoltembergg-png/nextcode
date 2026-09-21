@@ -39,6 +39,7 @@ function semifStatus(status: SemifStatus): SemifStatusInfo {
     backendRequested: "auto",
     backendFallback: false,
     systemRuntimeMissing: false,
+    routing: { requested: "off", effective: "off" },
     choices,
     host: "127.0.0.1",
     port: 8817,
@@ -61,6 +62,7 @@ function statusLayer(config: ConfigV1.Info, semif: SemifStatusInfo, failure?: st
     start: () => Effect.succeed(semif),
     acquire: () => Effect.succeed(semif),
     decide: () => Effect.die("OMO status must not route through SemIf"),
+    rememberRouting: () => Effect.void,
     dispose: () => Effect.void,
   } as SemifService.Interface
   return LayerNode.compile(LayerNode.group([OmoStatus.node, Config.node]), [

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["appimage"],
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/share/opencode/opencode-cli": "binaries/opencode-cli-real"
+        }
+      },
+      "deb": {
+        "files": {
+          "/usr/share/opencode/opencode-cli": "binaries/opencode-cli-real"
+        }
+      }
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "NextCode",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "decorations": false,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

@@ -3,10 +3,13 @@ import { availableParallelism } from "node:os"
 import type { BackendPreference } from "./backend"
 
 export type SemifMode = "auto" | "lazy" | "off"
+export type Routing = "off" | "assist" | "shadow" | "route" | "authoritative"
+export type EffectiveRouting = "off" | "assist" | "shadow"
 
 export type SemifOptions = {
   mode?: string
   backend?: string
+  routing?: string
   modelPath?: string
   serverPath?: string
   port?: number
@@ -21,6 +24,7 @@ export type SemifOptions = {
 export type SemifResolved = {
   mode: SemifMode
   backend: BackendPreference
+  routing: Routing
   host: string
   port: number
   threads: number
@@ -30,6 +34,16 @@ export type SemifResolved = {
   cacheSize: number
   modelPath?: string
   serverPath?: string
+}
+
+export function effectiveRouting(requested: Routing): {
+  effective: EffectiveRouting
+  fallbackReason?: "mode_not_shipped"
+} {
+  if (requested === "route" || requested === "authoritative") {
+    return { effective: "shadow", fallbackReason: "mode_not_shipped" }
+  }
+  return { effective: requested }
 }
 
 export type SemifPathStatus = {
@@ -42,6 +56,7 @@ export type SemifPathStatus = {
 const DEFAULTS = {
   mode: "auto" as SemifMode,
   backend: "auto" as BackendPreference,
+  routing: "off" as Routing,
   host: "127.0.0.1",
   port: 8817,
   contextSize: 2048,
@@ -104,6 +119,19 @@ export function parseSemifOptions(raw?: unknown): SemifResolved {
     throw new Error(`semif: backend must be "auto", "cpu", "cuda", "hip" or "vulkan" (got "${backendRaw}")`)
   }
 
+  const routingRaw = (readString(options.routing) ?? readString(env.SEMIF_ROUTING) ?? DEFAULTS.routing).toLowerCase()
+  if (
+    routingRaw !== "off" &&
+    routingRaw !== "assist" &&
+    routingRaw !== "shadow" &&
+    routingRaw !== "route" &&
+    routingRaw !== "authoritative"
+  ) {
+    throw new Error(
+      `semif: routing must be "off", "assist", "shadow", "route" or "authoritative" (got "${routingRaw}")`,
+    )
+  }
+
   // Paths are supplied by options, env, or (in later phases) acquisition/packaging.
   // There are deliberately no author-machine fallbacks here; existence is checked by assertSemifPaths.
   const modelPath = readString(options.modelPath) ?? readString(env.SEMIF_MODEL_PATH)
@@ -144,6 +172,7 @@ export function parseSemifOptions(raw?: unknown): SemifResolved {
   return {
     mode: modeRaw,
     backend: backendRaw,
+    routing: routingRaw,
     host,
     port,
     threads,

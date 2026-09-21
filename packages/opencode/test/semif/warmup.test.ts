@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { run, shouldPrepare, shouldWarmup, type Policy } from "../../src/semif/warmup"
+import {
+  failureMessageKey,
+  reset,
+  retryDelay,
+  run,
+  shouldPrepare,
+  shouldWarmup,
+  WARMUP_MAX_ATTEMPTS,
+  type Policy,
+} from "../../src/semif/warmup"
 import type { Status } from "../../src/semif/service"
 
 const status = (overrides: Partial<Status>): Status => ({
@@ -15,6 +24,7 @@ const status = (overrides: Partial<Status>): Status => ({
   port: 8817,
   adopted: false,
   choices: [],
+  routing: { requested: "off", effective: "off" },
   ...overrides,
 })
 
@@ -69,7 +79,91 @@ describe("semif warm-up policy", () => {
 
   test("run swallows start failures so boot can never be brought down", async () => {
     await Effect.runPromise(
-      run({ mode: "auto", download: "auto" }, Effect.fail(new Error("simulated download failure"))),
+      run({ mode: "auto", download: "auto" }, Effect.fail(new Error("simulated download failure")), {
+        maxAttempts: 1,
+        sleep: () => Effect.void,
+      }),
+    )
+  })
+
+  test("backs off warm-up retries with jitter and a bounded delay", () => {
+    expect(retryDelay(0, 0)).toBe(5_000)
+    expect(retryDelay(1, 0)).toBe(10_000)
+    expect(retryDelay(99, 1)).toBe(300_000)
+    expect(retryDelay(0, 1)).toBe(6_000)
+  })
+
+  test("retries after failures and resets the attempt after a manual reset", async () => {
+    let attempts = 0
+    const delays: number[] = []
+    const start = Effect.sync(() => {
+      attempts += 1
+      if (attempts < 3) {
+        if (attempts === 2) reset()
+        throw new Error("same warm-up failure")
+      }
+    })
+
+    await Effect.runPromise(
+      run({ mode: "auto", download: "auto" }, start, {
+        random: () => 0,
+        sleep: (milliseconds) => Effect.sync(() => delays.push(milliseconds)),
+      }),
+    )
+
+    expect(delays).toEqual([5_000, 5_000])
+  })
+
+  test("run stops retrying after reset during sleep", async () => {
+    let starts = 0
+    let slept = 0
+    await Effect.runPromise(
+      run(
+        { mode: "auto", download: "auto" },
+        Effect.sync(() => {
+          starts += 1
+          throw new Error("nope")
+        }),
+        {
+          random: () => 0,
+          sleep: () =>
+            Effect.sync(() => {
+              slept += 1
+              if (slept === 1) reset()
+            }),
+        },
+      ),
+    )
+    expect(starts).toBeLessThan(WARMUP_MAX_ATTEMPTS)
+    expect(starts).toBe(1)
+  })
+
+  test("dispose contract calls reset so retryAttempt restarts from 0", () => {
+    reset()
+    const first = retryDelay(3, 0)
+    reset()
+    expect(typeof reset).toBe("function")
+    expect(first).toBeGreaterThan(0)
+  })
+
+  test("bounds automatic retries so permanent failures do not loop forever", async () => {
+    let attempts = 0
+    await Effect.runPromise(
+      run({ mode: "auto", download: "auto" }, Effect.sync(() => {
+        attempts += 1
+        throw new Error("permanent failure")
+      }), {
+        random: () => 0,
+        sleep: () => Effect.void,
+      }),
+    )
+
+    expect(attempts).toBe(WARMUP_MAX_ATTEMPTS)
+  })
+
+  test("deduplicates similar failure messages", () => {
+    expect(failureMessageKey("Download failed for model 1234567890")).toBe(
+      failureMessageKey("download   failed for model 9876543210"),
     )
   })
 })

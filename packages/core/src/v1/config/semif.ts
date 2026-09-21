@@ -21,6 +21,12 @@ export const Backend = Schema.Literals(["auto", "cpu", "cuda", "hip", "vulkan"])
 })
 export type Backend = Schema.Schema.Type<typeof Backend>
 
+export const Routing = Schema.Literals(["off", "assist", "shadow", "route", "authoritative"]).annotate({
+  identifier: "SemifRouting",
+  description: "How SemIf observes Session V2 compaction choices",
+})
+export type Routing = Schema.Schema.Type<typeof Routing>
+
 export const Info = Schema.Struct({
   mode: Mode.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))).annotate({
     description:
@@ -33,6 +39,10 @@ export const Info = Schema.Struct({
   backend: Backend.pipe(Schema.withDecodingDefault(Effect.succeed("auto" as const))).annotate({
     description:
       "Exclusive llama-server backend: 'auto', 'cpu', 'cuda', 'hip', or 'vulkan'. HIP/ROCm is supported on Windows x64 and Ubuntu x64 only (default: auto)",
+  }),
+  routing: Routing.pipe(Schema.withDecodingDefault(Effect.succeed("off" as const))).annotate({
+    description:
+      "How SemIf observes Session V2: off, assist, shadow, route, authoritative. route/authoritative are accepted and executed as shadow until shipped (default: off)",
   }),
   threads: Schema.optional(PositiveInt).annotate({
     description: "Threads for the local model server. Defaults to the machine's available parallelism.",

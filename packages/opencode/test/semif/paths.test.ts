@@ -5,8 +5,10 @@ import { tmpdir } from "node:os"
 import { Global } from "@opencode-ai/core/global"
 import { hipPlatformSupported } from "../../src/semif/backend"
 import { readHipLock } from "../../src/semif/hip-runtime"
+import { readVulkanLock } from "../../src/semif/vulkan-runtime"
 import {
   LIBS_ENV,
+  LIBS_VULKAN_ENV,
   SERVER_ENV,
   SERVER_ENV_FALLBACK,
   downloadsRoot,
@@ -19,6 +21,9 @@ import {
   hipRuntimeDir,
   hipRuntimeMarkerPath,
   pinnedHipSha256,
+  pinnedVulkanSha256,
+  vulkanRuntimeDir,
+  vulkanRuntimeMarkerPath,
   runtimeDir,
   runtimeRoot,
   serverBinaryName,
@@ -80,6 +85,10 @@ describe("semif paths", () => {
     expect(hipRuntimeMarkerPath(HASH)).toBe(
       path.join(Global.Path.data, "semif", "runtime", `hip-${HASH.slice(0, 12)}`, ".hip-runtime.json"),
     )
+    expect(vulkanRuntimeDir(HASH)).toBe(path.join(Global.Path.data, "semif", "runtime", `vulkan-${HASH.slice(0, 12)}`))
+    expect(vulkanRuntimeMarkerPath(HASH)).toBe(
+      path.join(Global.Path.data, "semif", "runtime", `vulkan-${HASH.slice(0, 12)}`, ".vulkan-runtime.json"),
+    )
   })
 
   test("libs path comes from the dedicated launcher env and ignores blanks", () => {
@@ -118,5 +127,78 @@ describe("semif paths", () => {
     expect(resolveServerPath({ configPath: hip, variant: "hip" })).toBe(hip)
     expect(resolveServerPath({ configPath: cpu, variant: "hip", env: { [SERVER_ENV]: cpu } })).toBeUndefined()
     expect(resolveLibsPath({ NEXTCODE_SEMIF_HIP_LIBS_PATH: "/resources/semif-hip" }, "hip")).toBe("/resources/semif-hip")
+  })
+
+  test("staged Vulkan path resolves only the lock-pinned vulkan-<sha12> directory", async () => {
+    if (!hipPlatformSupported()) return
+    const vulkan = await readVulkanLock()
+    if (!vulkan) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-paths-vulkan-lock-"))
+    const previousData = Global.Path.data
+    Object.assign(Global.Path, { data: root })
+    const stale = vulkanRuntimeDir("0000000000000000000000000000000000000000000000000000000000000001")
+    const current = vulkanRuntimeDir(vulkan.entry.sha256)
+    mkdirSync(stale, { recursive: true })
+    mkdirSync(current, { recursive: true })
+    writeFileSync(path.join(stale, serverBinaryName()), "stale")
+    writeFileSync(path.join(current, serverBinaryName()), "current")
+    writeFileSync(
+      path.join(current, ".vulkan-runtime.json"),
+      `${JSON.stringify({
+        version: 1,
+        sha256: vulkan.entry.sha256,
+        target: vulkan.target,
+        files: [{ name: serverBinaryName(), bytes: Buffer.byteLength("current") }],
+      })}\n`,
+    )
+    try {
+      expect(pinnedVulkanSha256()).toBe(vulkan.entry.sha256)
+      expect(resolveServerPath({ variant: "vulkan" })).toBe(path.join(current, serverBinaryName()))
+      expect(resolveLibsPath({}, "vulkan")).toBe(current)
+    } finally {
+      Object.assign(Global.Path, { data: previousData })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("staged Vulkan path rejects an invalid marker or missing registered files", async () => {
+    if (!hipPlatformSupported()) return
+    const vulkan = await readVulkanLock()
+    if (!vulkan) return
+    const root = mkdtempSync(path.join(tmpdir(), "semif-paths-vulkan-incomplete-"))
+    const previousData = Global.Path.data
+    Object.assign(Global.Path, { data: root })
+    const current = vulkanRuntimeDir(vulkan.entry.sha256)
+    mkdirSync(current, { recursive: true })
+    writeFileSync(path.join(current, serverBinaryName()), "current")
+    try {
+      writeFileSync(path.join(current, ".vulkan-runtime.json"), "{}")
+      expect(resolveServerPath({ variant: "vulkan" })).toBeUndefined()
+
+      writeFileSync(
+        path.join(current, ".vulkan-runtime.json"),
+        `${JSON.stringify({
+          version: 1,
+          sha256: vulkan.entry.sha256,
+          target: vulkan.target,
+          files: [
+            { name: serverBinaryName(), bytes: Buffer.byteLength("current") },
+            { name: "ggml-vulkan.so", bytes: 4 },
+          ],
+        })}\n`,
+      )
+      expect(resolveServerPath({ variant: "vulkan" })).toBeUndefined()
+    } finally {
+      Object.assign(Global.Path, { data: previousData })
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("vulkan server and libs paths prefer vulkan-specific locations", () => {
+    const cpu = "/bundle/llama-server-x86_64-pc-windows-msvc.exe"
+    const vulkan = "/bundle/llama-server-x86_64-pc-windows-msvc-vulkan.exe"
+    expect(resolveServerPath({ configPath: vulkan, variant: "vulkan" })).toBe(vulkan)
+    expect(resolveServerPath({ configPath: cpu, variant: "vulkan", env: { [SERVER_ENV]: cpu } })).toBeUndefined()
+    expect(resolveLibsPath({ [LIBS_VULKAN_ENV]: "/resources/semif-vulkan" }, "vulkan")).toBe("/resources/semif-vulkan")
   })
 })

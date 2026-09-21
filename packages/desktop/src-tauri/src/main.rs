@@ -101,6 +101,31 @@ fn bind_sidecar_to_job(_pid: u32) -> Option<isize> {
     None
 }
 
+#[cfg(unix)]
+fn bind_sidecar_to_process_group(pid: u32) {
+    let pgid = pid as i32;
+    let result = unsafe { libc::setpgid(pgid, pgid) };
+    if result != 0 {
+        log::error!("[shell] setpgid failed for sidecar {pid}");
+        return;
+    }
+    log::info!("[shell] sidecar {pid} bound to process group");
+}
+
+#[cfg(not(unix))]
+fn bind_sidecar_to_process_group(_pid: u32) {}
+
+#[cfg(unix)]
+fn kill_sidecar_group(pid: u32) {
+    let pgid = pid as i32;
+    unsafe {
+        libc::killpg(pgid, libc::SIGTERM);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_sidecar_group(_pid: u32) {}
+
 #[cfg(windows)]
 fn close_job(handle: isize) {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -295,6 +320,7 @@ fn spawn_sidecar(app: &AppHandle, endpoint: Endpoint, attempt: u32) {
     let pid = child.pid();
     log::info!("[shell] sidecar spawned pid={pid} port={}", endpoint.port);
     *app.state::<ShellState>().child.lock().unwrap() = Some(child);
+    bind_sidecar_to_process_group(pid);
 
     // Bind the child to a kill-on-close job (replacing any job from a previous
     // sidecar, which also cleans up stragglers from an earlier restart).
@@ -482,6 +508,8 @@ fn set_zoom(app: AppHandle, state: State<'_, ShellState>, window: tauri::Webview
 fn kill_sidecar(state: State<'_, ShellState>) {
     *state.stopping.lock().unwrap() = true;
     if let Some(child) = state.child.lock().unwrap().take() {
+        let pid = child.pid();
+        kill_sidecar_group(pid);
         let _ = child.kill();
         log::info!("[shell] sidecar killed on request");
     }
@@ -1817,6 +1845,7 @@ fn main() {
                 *app.state::<ShellState>().stopping.lock().unwrap() = true;
                 if let Some(child) = app.state::<ShellState>().child.lock().unwrap().take() {
                     let pid = child.pid();
+                    kill_sidecar_group(pid);
                     let _ = child.kill();
                     log::info!("[shell] sidecar killed pid={pid}");
                 }

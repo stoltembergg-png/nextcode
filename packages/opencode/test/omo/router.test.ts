@@ -41,6 +41,7 @@ function status(value: SemifStatus, mode: Status["mode"] = "auto"): Status {
     backendRequested: "auto",
     backendFallback: false,
     systemRuntimeMissing: false,
+    routing: { requested: "off", effective: "off" },
     choices: [],
     host: "127.0.0.1",
     port: 8817,
@@ -92,6 +93,7 @@ function fakeSemif(
         counts.decide += 1
         counts.requests.push(request)
       }).pipe(Effect.andThen(decide(request))),
+    rememberRouting: () => Effect.void,
     dispose: () => Effect.void,
   }
 }

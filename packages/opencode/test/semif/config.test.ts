@@ -5,6 +5,7 @@ import { assertSemifPaths, checkSemifPaths, parseSemifOptions } from "../../src/
 const ENV_KEYS = [
   "SEMIF_MODE",
   "SEMIF_BACKEND",
+  "SEMIF_ROUTING",
   "SEMIF_MODEL_PATH",
   "SEMIF_SERVER_PATH",
   "SEMIF_HOST",
@@ -164,5 +165,13 @@ describe("semif config", () => {
 
   test("assertSemifPaths rejects when paths are unconfigured", async () => {
     await expect(assertSemifPaths(parseSemifOptions())).rejects.toThrow(/modelPath is not configured/)
+  })
+
+  test("routing defaults to off and demotes route/authoritative to shadow", async () => {
+    const { parseSemifOptions, effectiveRouting } = await import("../../src/semif/config")
+    expect(parseSemifOptions({}).routing).toBe("off")
+    expect(effectiveRouting("shadow")).toEqual({ effective: "shadow" })
+    expect(effectiveRouting("route")).toEqual({ effective: "shadow", fallbackReason: "mode_not_shipped" })
+    expect(effectiveRouting("authoritative")).toEqual({ effective: "shadow", fallbackReason: "mode_not_shipped" })
   })
 })

@@ -61,7 +61,7 @@ jobs:
         working-directory: packages/opencode
         env:
           OPENCODE_CHANNEL: ${{ inputs.channel || 'prod' }}
-        run: bun run build --skip-embed-web-ui --targets=opencode-windows-x64,opencode-darwin-arm64
+        run: bun run build --skip-embed-web-ui --targets=opencode-windows-x64,opencode-darwin-arm64,opencode-linux-x64
 
       - uses: actions/upload-artifact@v6
         with:
@@ -139,8 +139,9 @@ jobs:
             BASE="$TARGET"
             case "$TARGET" in
               *-hip) VARIANT=hip; BASE="${TARGET%-hip}" ;;
+              *-vulkan) VARIANT=vulkan; BASE="${TARGET%-vulkan}" ;;
             esac
-            export NEXTCODE_SEMIF_MIRROR="https://github.com/${REPO}/releases/download/${MIRROR_TAG}/${NAME}"
+            # Dest URL 404s until this upload finishes. --download-only pulls ggml-org only.
             bun packages/opencode/script/fetch-semif-server.ts --target "$BASE" --variant "$VARIANT" --download-only
             cp "packages/desktop/src-tauri/.semif-cache/${ASSET}" "/tmp/${NAME}"
             gh release upload "$MIRROR_TAG" "/tmp/${NAME}" --clobber --repo "$REPO"
@@ -158,6 +159,8 @@ jobs:
             bundles: nsis
           - platform: macos-latest
             bundles: app,dmg
+          - platform: ubuntu-24.04
+            bundles: appimage
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 120
     permissions:
@@ -238,26 +241,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          mkdir -p packages/desktop/src-tauri/binaries
-          case "$RUNNER_OS" in
-            Windows)
-              cp packages/opencode/dist/opencode-windows-x64/bin/opencode.exe \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}.exe"
-              ;;
-            macOS)
-              case "$(uname -m)" in
-                arm64) PLATFORM=opencode-darwin-arm64 ;;
-                x86_64) PLATFORM=opencode-darwin-x64 ;;
-                *) echo "unsupported arch"; exit 1 ;;
-              esac
-              cp "packages/opencode/dist/${PLATFORM}/bin/opencode" \
-                 "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              # Artifact downloads drop the executable bit.
-              chmod +x "packages/desktop/src-tauri/binaries/opencode-cli-${TRIPLE}"
-              ;;
-            *) echo "unsupported runner"; exit 1 ;;
-          esac
+          bun packages/desktop/scripts/stage-opencode-sidecar.ts
           ls -l packages/desktop/src-tauri/binaries
 
       - name: Vendor the llama-server runtime
@@ -270,6 +254,7 @@ jobs:
           case "$RUNNER_OS" in
             Windows) EXT=.zip ;;
             macOS) EXT=.tar.gz ;;
+            Linux) EXT=.tar.gz ;;
             *) echo "unsupported runner"; exit 1 ;;
           esac
           export NEXTCODE_SEMIF_MIRROR="https://github.com/${{ github.repository }}/releases/download/semif-server-${PIN}/semif-server-${PIN}-${TRIPLE}${EXT}"
@@ -329,6 +314,13 @@ jobs:
           '
         working-directory: packages/desktop
 
+      - name: Install WebKitGTK (Linux)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
       - name: Build the bundle
         working-directory: packages/desktop
         shell: bash
@@ -347,6 +339,10 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/apple-api-key.p8
           APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY_CONTENTS }}
+          # linuxdeploy's bundled strip cannot parse Ubuntu 24.04 glibc/GTK
+          # `.relr.dyn` (ELF type 0x13). Harmless on Windows/macOS.
+          # See https://github.com/tauri-apps/tauri/issues/14796
+          NO_STRIP: "true"
         run: |
           set -euo pipefail
           if [ "${HAS_APPLE:-false}" = "true" ]; then
@@ -356,6 +352,11 @@ jobs:
             # and fails on the missing .p8; drop them and sign ad-hoc instead.
             unset APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH APPLE_API_KEY_CONTENTS APPLE_SIGNING_IDENTITY
             export APPLE_SIGNING_IDENTITY="-"
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # llama-server is an externalBin; linuxdeploy ldd's it and must
+            # resolve libllama-server-impl.so from the staged SemIf resource dir.
+            export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/packages/desktop/src-tauri/semif${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           fi
           bun run tauri build --config src-tauri/tauri.ci.conf.json --bundles "${{ matrix.bundles }}"
 
@@ -472,6 +473,7 @@ jobs:
             Windows) PLATFORM_KEY="windows-x86_64"; ARTIFACT=$(basename "$(ls "$OUT"/*setup.exe)") ;;
             # The macOS updater consumes the .app.tar.gz (the .dmg is for manual installs).
             macOS) PLATFORM_KEY="darwin-aarch64"; ARTIFACT=$(basename "$(ls "$OUT"/*.app.tar.gz)") ;;
+            Linux) PLATFORM_KEY="linux-x86_64"; ARTIFACT=$(basename "$(ls "$OUT"/*.AppImage)") ;;
           esac
           if [ -f "$OUT/${ARTIFACT}.sig" ]; then
             export VERSION PLATFORM_KEY
@@ -637,7 +639,7 @@ jobs:
             gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --notes-file gh-release-body.md $TARGET $PRERELEASE
           fi
           # Only the platform bundles and the merged feed: the sidecar artifact is internal.
-          find artifacts/tauri-release-* -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.sig" \) -print0 |
+          find artifacts/tauri-release-* -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.AppImage" -o -name "*.sig" \) -print0 |
             xargs -0 -r gh release upload "$TAG" --clobber --repo "${{ github.repository }}"
           if [ -f artifacts/latest.json ]; then
             gh release upload "$TAG" artifacts/latest.json --clobber --repo "${{ github.repository }}"

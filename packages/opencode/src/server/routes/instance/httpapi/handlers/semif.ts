@@ -1,4 +1,5 @@
 import { SemifService } from "@/semif/service"
+import { SemifWarmup } from "@/semif/warmup"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { RootHttpApi } from "../api"
@@ -16,10 +17,12 @@ export const semifHandlers = HttpApiBuilder.group(RootHttpApi, "semif", (handler
     })
 
     const start = Effect.fn("SemifHttpApi.start")(function* () {
+      SemifWarmup.reset()
       return yield* service.start().pipe(Effect.catch(() => service.status()))
     })
 
     const acquire = Effect.fn("SemifHttpApi.acquire")(function* () {
+      SemifWarmup.reset()
       return yield* service.acquire().pipe(Effect.catch(() => service.status()))
     })
 

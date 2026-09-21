@@ -7,6 +7,7 @@ import {
   semifBackendMessageKey,
   semifHipFetchInProgress,
   semifLifecycleStatusKey,
+  semifVulkanFetchInProgress,
 } from "./semif-backend-status"
 
 const base = (): SemifStatus => ({
@@ -158,6 +159,7 @@ describe("semifBackendFallbackI18nKey", () => {
     expect(semifBackendFallbackI18nKey("missing_rocm_runtime")).toBe("semif.backend.fallback.missing_rocm_runtime")
     expect(semifBackendFallbackI18nKey("hip_download_failed")).toBe("semif.backend.fallback.hip_download_failed")
     expect(semifBackendFallbackI18nKey("gpu_unsupported")).toBe("semif.backend.fallback.gpu_unsupported")
+    expect(semifBackendFallbackI18nKey("missing_vulkan_runtime")).toBe("semif.backend.fallback.missing_vulkan_runtime")
   })
 
   test("uses unknown key when reason is missing", () => {
@@ -220,15 +222,49 @@ describe("semifBackendMessageKey", () => {
     ).toBe("semif.backend.system_runtime_missing")
   })
 
+  test("selects Vulkan loader copy when the ICD is missing", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        backendFallback: true,
+        backendFallbackReason: "missing_vulkan_runtime",
+        systemRuntimeMissing: true,
+      }),
+    ).toBe("semif.backend.fallback.missing_vulkan_runtime")
+  })
+
   test("selects fallback reason copy for vendored binary absence when idle", () => {
     expect(
       semifBackendMessageKey({
         ...base(),
         status: "offline",
+        backendRequested: "hip",
         backendFallback: true,
         backendFallbackReason: "no_vendored_binary",
       }),
     ).toBe("semif.backend.fallback.no_vendored_binary")
+  })
+
+  test("selects Vulkan vendored-binary copy for auto idle CPU fallback", () => {
+    expect(
+      semifBackendMessageKey({
+        ...base(),
+        status: "offline",
+        backend: "cpu",
+        backendRequested: "auto",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.fallback.no_vendored_binary_vulkan")
+    expect(
+      semifBackendFallbackI18nKey("no_vendored_binary", {
+        ...base(),
+        backend: "cpu",
+        backendRequested: "vulkan",
+        backendFallback: true,
+        backendFallbackReason: "no_vendored_binary",
+      }),
+    ).toBe("semif.backend.fallback.no_vendored_binary_vulkan")
   })
 
   test("selects fallback reason copy for HIP download failure", () => {
@@ -304,6 +340,80 @@ describe("semifLifecycleStatusKey", () => {
         backendFallback: false,
       }),
     ).toBe("semif.state.downloading")
+  })
+})
+
+describe("semifVulkanFetchInProgress", () => {
+  test("detects vulkan fetch in progress", () => {
+    expect(
+      semifVulkanFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backend: "cpu",
+        backendRequested: "auto",
+        backendFallback: false,
+      }),
+    ).toBe(true)
+  })
+
+  test("auto Vulkan warmup copy wins over HIP when the fetch message is Vulkan", () => {
+    const snapshot = {
+      ...base(),
+      status: "downloading" as const,
+      backend: "cpu" as const,
+      backendRequested: "auto" as const,
+      backendFallback: false,
+      backendMessage: "semif: fetching Vulkan runtime",
+    }
+    expect(semifHipFetchInProgress(snapshot)).toBe(true)
+    expect(semifVulkanFetchInProgress(snapshot)).toBe(true)
+    expect(semifBackendDisplayState(snapshot)).toBe("vulkan_fetch_in_progress")
+    expect(semifBackendMessageKey(snapshot)).toBe("semif.backend.vulkan_downloading")
+    expect(semifLifecycleStatusKey(snapshot)).toBe("semif.state.downloading_vulkan_runtime")
+  })
+
+  test("gpu_unsupported hip fetch is still skipped", () => {
+    expect(
+      semifHipFetchInProgress({
+        ...base(),
+        status: "downloading",
+        backendFallbackReason: "gpu_unsupported",
+        backendRequested: "hip",
+      }),
+    ).toBe(false)
+  })
+
+  test("auto HIP/ROCm fetch keeps HIP copy when the message is not Vulkan", () => {
+    const snapshot = {
+      ...base(),
+      status: "downloading" as const,
+      backend: "cpu" as const,
+      backendRequested: "auto" as const,
+      backendFallback: false,
+      backendMessage: "semif: fetching HIP runtime",
+    }
+    expect(semifHipFetchInProgress(snapshot)).toBe(true)
+    expect(semifVulkanFetchInProgress(snapshot)).toBe(true)
+    expect(semifBackendDisplayState(snapshot)).toBe("hip_fetch_in_progress")
+    expect(semifBackendMessageKey(snapshot)).toBe("semif.backend.hip_downloading")
+    expect(semifLifecycleStatusKey(snapshot)).toBe("semif.state.downloading_hip_runtime")
+  })
+})
+
+describe("semifBackendDisplayState vulkan", () => {
+  test("reports vulkan active", () => {
+    expect(
+      semifBackendDisplayState({
+        ...base(),
+        backend: "vulkan",
+        backendRequested: "auto",
+        backendFallback: false,
+      }),
+    ).toBe("vulkan_active")
+    expect(semifBackendMessageKey({ ...base(), backend: "vulkan", backendFallback: false })).toBe(
+      "semif.backend.vulkan_active",
+    )
+    expect(semifBackendDotClass("vulkan_active")).toBe("bg-icon-success-base")
   })
 })
 
