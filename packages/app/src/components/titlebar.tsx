@@ -27,6 +27,7 @@ import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { WindowsAppMenu } from "./windows-app-menu"
+import { LinuxCaptionControls } from "./linux-caption-controls"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { TitlebarTabStrip } from "@/components/titlebar-tab-strip"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -45,6 +46,14 @@ const v2TitlebarHeight = 36
 const minTitlebarZoom = 0.25
 const windowsControlsBaseWidth = 138 // 3 native Windows caption buttons at 46px each.
 const macTrafficLightsBaseWidth = 84
+
+export function captionGutterOs(os: "macos" | "windows" | "linux" | undefined): boolean {
+  return os === "windows" || os === "linux"
+}
+
+export function captionGutterWidthPx(zoom: number): string {
+  return `${windowsControlsBaseWidth / Math.max(zoom, 1)}px`
+}
 
 export type TitlebarUpdate = {
   version: () => string | undefined
@@ -81,15 +90,15 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
   const web = createMemo(() => platform.platform === "web")
   const macTrafficLights = createMemo(() => mac() && !platform.windowFullscreen?.())
   const zoom = () => platform.webviewZoom?.() ?? 1
-  const titlebarZoom = () => (windows() ? Math.max(zoom(), minTitlebarZoom) : zoom())
-  const counterZoom = () => (windows() && titlebarZoom() < 1 ? 1 / titlebarZoom() : 1)
+  const titlebarZoom = () => (windows() || linux() ? Math.max(zoom(), minTitlebarZoom) : zoom())
+  const counterZoom = () => ((windows() || linux()) && titlebarZoom() < 1 ? 1 / titlebarZoom() : 1)
   const minHeight = () => {
     const height = useV2Titlebar() ? v2TitlebarHeight : legacyTitlebarHeight
     if (mac()) return `${height / zoom()}px`
-    if (windows()) return `${height / Math.min(titlebarZoom(), 1)}px`
+    if (windows() || linux()) return `${height / Math.min(titlebarZoom(), 1)}px`
     return undefined
   }
-  const windowsControlsWidth = () => `${windowsControlsBaseWidth / Math.max(titlebarZoom(), 1)}px`
+  const windowsControlsWidth = () => captionGutterWidthPx(titlebarZoom())
 
   const [history, setHistory] = createStore({
     stack: [] as string[],
@@ -181,10 +190,12 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
         "min-height": minHeight(),
         // Keep native macOS traffic lights clear even when the desktop window is narrow.
         "padding-left": macTrafficLights() ? `${macTrafficLightsBaseWidth / zoom()}px` : 0,
-        width: windows() ? `env(titlebar-area-width, calc(100vw - ${windowsControlsWidth()}))` : undefined,
-        "max-width": windows() ? `env(titlebar-area-width, calc(100vw - ${windowsControlsWidth()}))` : undefined,
+        width: captionGutterOs(platform.os) ? `env(titlebar-area-width, calc(100vw - ${windowsControlsWidth()}))` : undefined,
+        "max-width": captionGutterOs(platform.os)
+          ? `env(titlebar-area-width, calc(100vw - ${windowsControlsWidth()}))`
+          : undefined,
         // Native Windows caption controls remain on the physical right in both writing directions.
-        "margin-right": windows() ? "auto" : undefined,
+        "margin-right": captionGutterOs(platform.os) ? "auto" : undefined,
       }}
       data-tauri-drag-region
     >
@@ -431,6 +442,9 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 </TooltipV2>
                 <div class="flex-1" />
                 <TitlebarV2Right state={v2RightState()} />
+                <Show when={linux()}>
+                  <LinuxCaptionControls platform={platform} t={language.t} />
+                </Show>
               </div>
             )
           }}
@@ -576,13 +590,18 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
             <div
               classList={{
                 "flex items-center min-w-0 justify-end": true,
-                "pr-2": !windows(),
+                "pr-2": !captionGutterOs(platform.os),
               }}
               data-tauri-drag-region
             >
               <div id="opencode-titlebar-right" class="flex items-center gap-1 shrink-0 justify-end" />
-              <Show when={windows()}>
-                <div class="shrink-0" style={{ width: windowsControlsWidth() }} />
+              <Show when={windows() || linux()}>
+                <Show
+                  when={linux()}
+                  fallback={<div class="shrink-0" style={{ width: windowsControlsWidth() }} />}
+                >
+                  <LinuxCaptionControls platform={platform} t={language.t} />
+                </Show>
               </Show>
             </div>
           </div>
