@@ -16,6 +16,7 @@ import {
   createSignal,
   on,
   onMount,
+  type JSX,
   type ParentProps,
   untrack,
 } from "solid-js"
@@ -72,7 +73,7 @@ import {
 } from "@/pages/session/composer"
 import { ComposerStripBody, composerStrip } from "@/pages/session/composer/session-composer-strip"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
-import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
+import { questionActivity, SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { createOpenReviewFile, createSessionTabs, createSizing, shouldShowFileTree } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/timeline/message-timeline"
 import { createTimelineModel } from "@/pages/session/timeline/model"
@@ -1577,14 +1578,45 @@ export default function Page() {
     }
   })
 
-  const questionRequestRow = createMemo(() => {
+  const [questionActive, setQuestionActive] = createSignal<{ id: string; current: number; prompt: string }>()
+  const questionDock = createMemo((prev?: { id: string; body: JSX.Element }) => {
     const request = composer.questionRequest()
     if (!request) return
+    if (prev?.id === request.id) return prev
+    const id = request.id
+    return {
+      id,
+      body: (
+        <SessionQuestionDock
+          request={composer.questionRequest() ?? request}
+          onSubmit={resumeScroll}
+          onActive={(active) => {
+            setQuestionActive((current) => {
+              if (current?.id === id && current.current === active.current && current.prompt === active.prompt)
+                return current
+              return { id, current: active.current, prompt: active.prompt }
+            })
+          }}
+        />
+      ),
+    }
+  })
+
+  const questionRequestRow = createMemo(() => {
+    const request = composer.questionRequest()
+    const dock = questionDock()
+    if (!request || !dock) return
+    const active = questionActive()
+    const live = active?.id === request.id ? active : undefined
+    const seeded = questionActivity({ scope: serverSDK().scope, request })
     const total = request.questions.length
     return {
-      title: language.t("session.question.progress", { current: Math.min(1, total), total }),
-      target: request.questions[0]?.question ?? "",
-      body: <SessionQuestionDock request={request} onSubmit={resumeScroll} />,
+      title: language.t("session.question.progress", {
+        current: live ? Math.min(live.current, total) : seeded.current,
+        total,
+      }),
+      target: live?.prompt ?? seeded.prompt,
+      body: dock.body,
     }
   })
 

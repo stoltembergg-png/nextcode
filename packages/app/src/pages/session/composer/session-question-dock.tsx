@@ -3,7 +3,6 @@ import { createStore } from "solid-js/store"
 import { useMutation } from "@tanstack/solid-query"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
-import { useSpring } from "@opencode-ai/ui/motion-spring"
 import { showToast } from "@/utils/toast"
 import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
@@ -11,9 +10,20 @@ import { useSDK } from "@/context/sdk"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useServerSDK } from "@/context/server-sdk"
-import { ScopedKey } from "@/utils/server-scope"
+import { ScopedKey, type ServerScope } from "@/utils/server-scope"
 
 const cache = new Map<string, { tab: number; answers: QuestionAnswer[]; custom: string[]; customOn: boolean[] }>()
+const optionClass = "flex w-full items-start gap-3 rounded-md border border-border-weak-base px-2.5 py-2 text-left"
+
+export function questionActivity(input: { scope: ServerScope; request: QuestionRequest }) {
+  const total = input.request.questions.length
+  const saved = cache.get(ScopedKey.from(input.scope, input.request.id))?.tab ?? 0
+  const tab = Math.min(saved, Math.max(total - 1, 0))
+  return {
+    current: total === 0 ? 0 : tab + 1,
+    prompt: input.request.questions[tab]?.question ?? "",
+  }
+}
 
 function Mark(props: { multi: boolean; picked: boolean; onClick?: (event: MouseEvent) => void }) {
   return (
@@ -43,6 +53,8 @@ function Option(props: {
       ref={props.ref}
       data-slot="question-option"
       data-picked={props.picked}
+      class={optionClass}
+      classList={{ "bg-surface-interactive-weak": props.picked }}
       role={props.multi ? "checkbox" : "radio"}
       aria-checked={props.picked}
       disabled={props.disabled}
@@ -60,7 +72,11 @@ function Option(props: {
   )
 }
 
-export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
+export const SessionQuestionDock: Component<{
+  request: QuestionRequest
+  onSubmit: () => void
+  onActive?: (active: { current: number; total: number; prompt: string }) => void
+}> = (props) => {
   const sdk = useSDK()
   const serverSDK = useServerSDK()
   const language = useLanguage()
@@ -77,12 +93,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     customOn: cached?.customOn ?? ([] as boolean[]),
     editing: false,
     focus: 0,
-    minimized: false,
-    optionsHeight: 180,
   })
 
   let root: HTMLDivElement | undefined
-  let optionsRef: HTMLDivElement | undefined
   let customRef: HTMLButtonElement | undefined
   let optsRef: HTMLButtonElement[] = []
   let replied = false
@@ -95,17 +108,20 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const multi = createMemo(() => question()?.multiple === true)
   const count = createMemo(() => options().length + 1)
 
-  const summary = createMemo(() => {
-    const n = Math.min(store.tab + 1, total())
-    return language.t("session.question.progress", { current: n, total: total() })
+  createEffect(() => {
+    const questionsTotal = total()
+    const tab = Math.min(store.tab, Math.max(questionsTotal - 1, 0))
+    props.onActive?.({
+      current: questionsTotal === 0 ? 0 : tab + 1,
+      total: questionsTotal,
+      prompt: questions()[tab]?.question ?? "",
+    })
   })
+
   const customLabel = () => language.t("ui.messagePart.option.typeOwnAnswer")
   const customPlaceholder = () => language.t("ui.question.custom.placeholder")
 
   const last = createMemo(() => store.tab >= total() - 1)
-  const collapse = useSpring(() => (store.minimized ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
-  const hidden = createMemo(() => Math.max(0, Math.min(1, collapse())))
-  const optionsOff = createMemo(() => hidden() > 0.98)
 
   const customUpdate = (value: string, selected: boolean = on()) => {
     const prev = input().trim()
@@ -129,24 +145,14 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   const measure = () => {
     if (!root) return
+    const scroller = root.closest(".scroll-view__viewport")
+    if (!(scroller instanceof HTMLElement)) return
 
-    const scroller = document.querySelector(".scroll-view__viewport")
-    const head = scroller instanceof HTMLElement ? scroller.firstElementChild : undefined
-    const top =
-      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().bottom : 0
-    if (!top) {
-      root.style.removeProperty("--question-prompt-max-height")
-      return
-    }
-
-    const dock = root.closest('[data-component="session-prompt-dock"]')
-    if (!(dock instanceof HTMLElement)) return
-
-    const dockBottom = dock.getBoundingClientRect().bottom
-    const below = Math.max(0, dockBottom - root.getBoundingClientRect().bottom)
-    const gap = 8
-    const max = Math.max(240, Math.floor(dockBottom - top - gap - below))
-    root.style.setProperty("--question-prompt-max-height", `${max}px`)
+    const view = scroller.getBoundingClientRect()
+    const head = scroller.firstElementChild
+    const sticky =
+      head instanceof HTMLElement && head.classList.contains("sticky") ? head.getBoundingClientRect().height : 0
+    root.style.maxHeight = `${Math.max(240, Math.floor(view.height - sticky))}px`
   }
 
   const clamp = (i: number) => Math.max(0, Math.min(count() - 1, i))
@@ -186,23 +192,13 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
     makeEventListener(window, "resize", update)
 
-    const dock = root?.closest('[data-component="session-prompt-dock"]')
-    const scroller = document.querySelector(".scroll-view__viewport")
-    createResizeObserver([dock, scroller], update)
+    createResizeObserver(root?.closest(".scroll-view__viewport"), update)
 
     onCleanup(() => {
       if (raf !== undefined) cancelAnimationFrame(raf)
     })
 
     focus(pickFocus())
-  })
-
-  createEffect(() => {
-    const el = optionsRef
-    if (!el) return
-    const update = () => setStore("optionsHeight", (height) => Math.max(height, el.scrollHeight))
-    update()
-    createResizeObserver(el, update)
   })
 
   onCleanup(() => {
@@ -259,11 +255,6 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const submit = () => void reply(questions().map((_, i) => store.answers[i] ?? []))
-
-  const answered = (i: number) => {
-    if ((store.answers[i]?.length ?? 0) > 0) return true
-    return store.customOn[i] === true && (store.custom[i] ?? "").trim().length > 0
-  }
 
   const picked = (answer: string) => store.answers[store.tab]?.includes(answer) ?? false
 
@@ -419,7 +410,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     const tab = store.tab + 1
     setStore("tab", tab)
     setStore("editing", false)
-    if (!store.minimized) focus(pickFocus(tab))
+    focus(pickFocus(tab))
   }
 
   const back = () => {
@@ -428,95 +419,33 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     const tab = store.tab - 1
     setStore("tab", tab)
     setStore("editing", false)
-    if (!store.minimized) focus(pickFocus(tab))
-  }
-
-  const jump = (tab: number) => {
-    if (sending()) return
-    setStore("tab", tab)
-    setStore("editing", false)
-    if (!store.minimized) focus(pickFocus(tab))
-  }
-
-  const minimize = () => {
-    if (sending()) return
-    setStore("editing", false)
-    setStore("minimized", true)
-  }
-
-  const restore = () => {
-    if (sending()) return
-    setStore("minimized", false)
-    focus(pickFocus())
+    focus(pickFocus(tab))
   }
 
   return (
-    <div data-component="session-question-dock">
-      <div data-component="dock-prompt" data-kind="question" ref={(el) => (root = el)} onKeyDown={nav}>
-        <div data-slot="question-body">
-          <div data-slot="question-header">
-            <div data-slot="question-header-title">{summary()}</div>
-            <div data-slot="question-header-actions">
-              <Show when={total() > 1}>
-                <div data-slot="question-progress">
-                  <For each={questions()}>
-                    {(_, i) => (
-                      <button
-                        type="button"
-                        data-slot="question-progress-segment"
-                        data-active={i() === store.tab}
-                        data-answered={answered(i())}
-                        disabled={sending()}
-                        onClick={() => jump(i())}
-                        aria-label={language.t("ui.tool.questions.numbered", { number: i() + 1 })}
-                      />
-                    )}
-                  </For>
-                </div>
-              </Show>
-              <button
-                type="button"
-                data-component="icon-button"
-                data-icon="chevron-down"
-                data-size="normal"
-                data-variant="ghost"
-                disabled={sending()}
-                style={{ transform: `rotate(${hidden() * 180}deg)` }}
-                onClick={store.minimized ? restore : minimize}
-                aria-label={language.t(store.minimized ? "session.question.restore" : "session.question.minimize")}
-              >
-                <Icon name="chevron-down" size="small" />
-              </button>
-            </div>
-          </div>
-          <div data-slot="question-content">
-        <div
-          data-slot="question-text"
-          style={{
-            display: store.minimized ? "-webkit-box" : undefined,
-            "-webkit-line-clamp": store.minimized ? "3" : undefined,
-            "-webkit-box-orient": store.minimized ? "vertical" : undefined,
-            overflow: store.minimized ? "hidden" : undefined,
-          }}
-        >
+    <div
+      data-component="session-question-dock"
+      ref={(el) => (root = el)}
+      onKeyDown={nav}
+      class="flex min-h-0 flex-col gap-2 overflow-hidden"
+    >
+      <div data-slot="question-content" class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
+        <div data-slot="question-text" class="text-14-medium text-text-strong">
           {question()?.question}
         </div>
-        <Show when={!store.minimized}>
-          <Show when={multi()} fallback={<div data-slot="question-hint">{language.t("ui.question.singleHint")}</div>}>
-            <div data-slot="question-hint">{language.t("ui.question.multiHint")}</div>
-          </Show>
-        </Show>
-        <div
-          ref={(el) => (optionsRef = el)}
-          data-slot="question-options"
-          aria-hidden={store.minimized || optionsOff() ? "true" : undefined}
-          classList={{ "pointer-events-none": hidden() > 0.1 }}
-          style={{
-            "max-height": `${Math.max(0, store.optionsHeight * (1 - hidden()))}px`,
-            opacity: `${Math.max(0, Math.min(1, 1 - hidden()))}`,
-            visibility: optionsOff() ? "hidden" : "visible",
-          }}
+        <Show
+          when={multi()}
+          fallback={
+            <div data-slot="question-hint" class="text-13-regular text-text-weak">
+              {language.t("ui.question.singleHint")}
+            </div>
+          }
         >
+          <div data-slot="question-hint" class="text-13-regular text-text-weak">
+            {language.t("ui.question.multiHint")}
+          </div>
+        </Show>
+        <div data-slot="question-options" class="flex flex-col gap-1.5">
           <For each={options()}>
             {(opt, i) => (
               <Option
@@ -541,6 +470,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                 data-slot="question-option"
                 data-custom="true"
                 data-picked={on()}
+                class={optionClass}
+                classList={{ "bg-surface-interactive-weak": on() }}
                 role={multi() ? "checkbox" : "radio"}
                 aria-checked={on()}
                 disabled={sending()}
@@ -559,6 +490,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               data-slot="question-option"
               data-custom="true"
               data-picked={on()}
+              class={optionClass}
+              classList={{ "bg-surface-interactive-weak": on() }}
               role={multi() ? "checkbox" : "radio"}
               aria-checked={on()}
               onMouseDown={(e) => {
@@ -606,13 +539,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             </form>
           </Show>
         </div>
-        </div>
-        </div>
-        <div data-slot="question-footer">
-          <Button variant="ghost" size="large" disabled={sending()} onClick={reject} aria-keyshortcuts="Escape">
-            {language.t("ui.common.dismiss")}
-          </Button>
-          <div data-slot="question-footer-actions">
+      </div>
+      <div data-slot="question-footer" class="flex shrink-0 items-center justify-between gap-2">
+        <Button variant="ghost" size="large" disabled={sending()} onClick={reject} aria-keyshortcuts="Escape">
+          {language.t("ui.common.dismiss")}
+        </Button>
+        <div class="flex items-center gap-2">
             <Show when={store.tab > 0}>
               <Button variant="secondary" size="large" disabled={sending()} onClick={back}>
                 {language.t("ui.common.back")}
@@ -627,7 +559,6 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             >
               {last() ? language.t("ui.common.submit") : language.t("ui.common.next")}
             </Button>
-          </div>
         </div>
       </div>
     </div>

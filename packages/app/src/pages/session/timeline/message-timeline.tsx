@@ -79,7 +79,7 @@ import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
 import { routingStatusLabel } from "./omo-routing-status"
-import { openRequestKinds, requestScrollPadding, timelinePaddingEnd } from "./request-row"
+import { openRequestKinds, requestRowOffset, requestScrollPadding, timelinePaddingEnd } from "./request-row"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -1917,7 +1917,11 @@ export function MessageTimeline(props: {
               ref={setRequestBlock}
               class="absolute top-0 left-0 w-full"
               style={{
-                transform: `translateY(${virtualizer.getTotalSize() - requestScrollPadding(requestEnd())}px)`,
+                transform: `translateY(${requestRowOffset({
+                  totalSize: virtualizer.getTotalSize(),
+                  requestHeight: requestEnd(),
+                  scrollMargin: showHeader() ? 64 : 0,
+                })}px)`,
               }}
             >
               <Show when={openRequests().includes("permission") ? props.requests?.permission : undefined}>
