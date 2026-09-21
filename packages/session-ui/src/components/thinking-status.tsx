@@ -10,7 +10,6 @@ function tokenTotal(message: AssistantMessage | undefined) {
   const t = message.tokens
   return t.input + t.output + t.reasoning + t.cache.read + t.cache.write
 }
-
 function compactNumber(value: number, locale: string) {
   if (value < 1000) return Math.round(value).toString()
   const formatter = new Intl.NumberFormat(locale, {
@@ -20,11 +19,22 @@ function compactNumber(value: number, locale: string) {
   return formatter.format(value)
 }
 
+export function formatElapsed(startedAt: number | undefined, now: number, locale: string) {
+  if (startedAt === undefined) return ""
+  const elapsed = Math.max(0, now - startedAt)
+  if (elapsed < 1_000) return ""
+  const seconds = Math.floor(elapsed / 100) / 10
+  return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(seconds)}s`
+}
+
 export function ThinkingStatus(props: {
   active: boolean
   pendingMessage: AssistantMessage | undefined
   parts: readonly { type: string; tool?: string }[]
   children?: JSX.Element
+  label?: string
+  startedAt?: number
+  details?: "all" | "elapsed"
 }) {
   const i18n = useI18n()
   const [tick, setTick] = createSignal(0)
@@ -32,14 +42,14 @@ export function ThinkingStatus(props: {
 
   createEffect(
     on(
-      () => props.active,
-      (isActive) => {
+      () => [props.active, props.details] as const,
+      ([isActive, details]) => {
         if (timer) {
           clearInterval(timer)
           timer = undefined
         }
         if (!isActive) return
-        timer = setInterval(() => setTick((value) => value + 1), 1000)
+        timer = setInterval(() => setTick((value) => value + 1), details === "elapsed" ? 100 : 1000)
       },
     ),
   )
@@ -79,6 +89,11 @@ export function ThinkingStatus(props: {
     return diff > 0 ? Math.floor(diff / 1000) : 0
   })
 
+  const elapsedLabel = createMemo(() => {
+    tick()
+    return formatElapsed(props.startedAt ?? props.pendingMessage?.time.created, Date.now(), i18n.locale())
+  })
+
   const tokensLabel = createMemo(() => {
     const value = tokens()
     if (value <= 0) return ""
@@ -88,8 +103,57 @@ export function ThinkingStatus(props: {
   const showDecisions = createMemo(() => decisions() > 0)
   const showTokens = createMemo(() => tokensLabel().length > 0)
   const showElapsed = createMemo(() => elapsed() > 0)
+  const showElapsedOnly = createMemo(() => props.details === "elapsed" && elapsedLabel().length > 0)
   const title = () =>
-    props.active ? i18n.t("ui.sessionTurn.status.thinking") : i18n.t("ui.sessionTurn.status.thought")
+    props.label ?? (props.active ? i18n.t("ui.sessionTurn.status.thinking") : i18n.t("ui.sessionTurn.status.thought"))
+
+  const stats = () => {
+    if (props.details === "elapsed") {
+      if (!showElapsedOnly()) return
+      return (
+        <span data-slot="thinking-status-stats" data-active="true">
+          <span
+            data-slot="thinking-status-stat-elapsed"
+            data-active="true"
+            aria-label={i18n.t("ui.sessionTurn.thinking.elapsed")}
+          >
+            <span data-slot="thinking-status-stat-inner">{elapsedLabel()}</span>
+          </span>
+        </span>
+      )
+    }
+    if (!showDecisions() && !showTokens() && !showElapsed()) return
+    return (
+      <span data-slot="thinking-status-stats" data-active="true">
+        <Show when={showDecisions()}>
+          <span data-slot="thinking-status-stat-decisions" data-active="true">
+            <span data-slot="thinking-status-stat-inner">
+              <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
+            </span>
+          </span>
+        </Show>
+        <Show when={showDecisions() && showTokens()}>
+          <span data-slot="thinking-status-sep">·</span>
+        </Show>
+        <Show when={showTokens()}>
+          <span data-slot="thinking-status-stat-tokens" data-active="true">
+            <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
+          </span>
+        </Show>
+        <Show when={showTokens() && showElapsed()}>
+          <span data-slot="thinking-status-sep">·</span>
+        </Show>
+        <Show when={showElapsed()}>
+          <span data-slot="thinking-status-stat-elapsed" data-active="true">
+            <span data-slot="thinking-status-stat-inner">
+              <AnimatedNumber value={elapsed()} />
+              <span data-slot="thinking-status-stat-suffix">s</span>
+            </span>
+          </span>
+        </Show>
+      </span>
+    )
+  }
 
   return (
     <BasicTool
@@ -99,37 +163,7 @@ export function ThinkingStatus(props: {
       animated={props.children !== undefined}
       trigger={{
         title: title(),
-        action:
-          showDecisions() || showTokens() || showElapsed() ? (
-            <span data-slot="thinking-status-stats" data-active="true">
-              <Show when={showDecisions()}>
-                <span data-slot="thinking-status-stat-decisions" data-active="true">
-                  <span data-slot="thinking-status-stat-inner">
-                    <AnimatedCountLabel count={decisions()} plural="ui.sessionTurn.thinking.decisions" />
-                  </span>
-                </span>
-              </Show>
-              <Show when={showDecisions() && showTokens()}>
-                <span data-slot="thinking-status-sep">·</span>
-              </Show>
-              <Show when={showTokens()}>
-                <span data-slot="thinking-status-stat-tokens" data-active="true">
-                  <span data-slot="thinking-status-stat-inner">{tokensLabel()}</span>
-                </span>
-              </Show>
-              <Show when={showTokens() && showElapsed()}>
-                <span data-slot="thinking-status-sep">·</span>
-              </Show>
-              <Show when={showElapsed()}>
-                <span data-slot="thinking-status-stat-elapsed" data-active="true">
-                  <span data-slot="thinking-status-stat-inner">
-                    <AnimatedNumber value={elapsed()} />
-                    <span data-slot="thinking-status-stat-suffix">s</span>
-                  </span>
-                </span>
-              </Show>
-            </span>
-          ) : undefined,
+        action: stats(),
       }}
     >
       {props.children}

@@ -12,6 +12,8 @@ const sessionFields = new Set([
   "session_status",
   "session_working",
   "session_diff",
+  "omo_routing_activity",
+  "omo_routing_watermark",
   "todo",
   "permission",
   "question",

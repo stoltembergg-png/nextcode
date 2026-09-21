@@ -18,6 +18,7 @@ import { ConfigExperimental } from "./config/experimental"
 import { ConfigFormatter } from "./config/formatter"
 import { ConfigLSP } from "./config/lsp"
 import { ConfigMCP } from "./config/mcp"
+import { ConfigOmo } from "./config/omo"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
@@ -62,6 +63,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   agents: Schema.Record(Schema.String, ConfigAgent.Info).pipe(Schema.optional).annotate({
     description: "Named built-in agent overrides and custom agent definitions",
+  }),
+  omo: ConfigOmo.Info.pipe(Schema.optional).annotate({
+    description: "Native OMO orchestration, routing, and verification configuration",
   }),
   snapshots: Schema.Boolean.pipe(Schema.optional).annotate({
     description: "Enable snapshots used for undo and revert behavior",
@@ -143,6 +147,8 @@ const layer = Layer.effect(
     const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
+    const decodeInfoTolerant = (input: unknown) => decodeWithOptionalOmo(input, decodeInfo)
+    const decodeV1InfoTolerant = (input: unknown) => decodeWithOptionalOmo(input, decodeV1Info)
 
     const loadFile = Effect.fnUntraced(function* (filepath: string) {
       const text = yield* fs.readFileStringSafe(filepath)
@@ -154,11 +160,21 @@ const layer = Layer.effect(
 
       const info = Option.getOrUndefined(
         ConfigMigrateV1.isV1(input)
-          ? decodeV1Info(input).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfo))
-          : decodeInfo(input),
+          ? decodeV1InfoTolerant(input).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfoTolerant))
+          : decodeInfoTolerant(input),
       )
       if (!info) return
-      return new Document({ type: "document", path: filepath, info })
+      const rawOmo = ConfigOmo.rawInput(info)
+      const document = new Document({ type: "document", path: filepath, info })
+      if (rawOmo !== undefined) {
+        Object.defineProperty(document.info, "omo", {
+          configurable: true,
+          enumerable: true,
+          value: rawOmo,
+          writable: true,
+        })
+      }
+      return document
     })
 
     const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
@@ -225,3 +241,28 @@ export const node = makeLocationNode({
   layer,
   deps: [FSUtil.node, Global.node, Location.node, Policy.node],
 })
+
+function decodeWithOptionalOmo<T extends object>(
+  input: unknown,
+  decode: (input: unknown) => Option.Option<T>,
+): Option.Option<T> {
+  const decoded = decode(input)
+  if (Option.isSome(decoded)) return decoded
+  if (!isRecord(input) || !Object.hasOwn(input, "omo")) return decoded
+
+  const withoutOmo = { ...input }
+  delete withoutOmo.omo
+  const fallback = decode(withoutOmo)
+  if (Option.isNone(fallback)) return fallback
+
+  // Keep malformed optional OMO input attached so ConfigOmo.resolve can apply
+  // field-level defaults and sanitized diagnostics after the rest of the
+  // configuration has been retained. The public schema remains strict; this
+  // branch is only reachable for malformed data read from disk.
+  ConfigOmo.attachRawInput(fallback.value, input.omo)
+  return fallback
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input)
+}

@@ -19,6 +19,7 @@ import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "@/config/config"
 import { SemifService } from "@/semif/service"
+import { DelegationService } from "@/omo/delegation"
 import { SemifDecideTool, SemifStatusTool } from "./semif"
 import { type ToolContext as PluginToolContext, type ToolDefinition } from "@opencode-ai/plugin"
 import type { JSONSchema7, JSONSchema7Definition } from "@ai-sdk/provider"
@@ -450,6 +451,7 @@ export const node = LayerNode.make({
     FSUtil.node,
     EventV2Bridge.node,
     SemifService.node,
+    DelegationService.node,
     httpClient,
     CrossSpawnSpawner.node,
     Format.node,

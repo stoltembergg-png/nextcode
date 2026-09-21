@@ -30,6 +30,7 @@ import { LocationMiddleware } from "@opencode-ai/server/location"
 import { SessionLocationMiddleware } from "@opencode-ai/server/middleware/session-location"
 import { GlobalApi } from "./groups/global"
 import { SemifApi } from "./groups/semif"
+import { OmoApi } from "./groups/omo"
 import { Authorization } from "./middleware/authorization"
 import { SchemaErrorMiddleware } from "./middleware/schema-error"
 
@@ -57,6 +58,7 @@ export const RootHttpApi = HttpApi.make("opencode-root")
   .addHttpApi(ControlPlaneApi)
   .addHttpApi(GlobalApi)
   .addHttpApi(SemifApi)
+  .addHttpApi(OmoApi)
   .middleware(SchemaErrorMiddleware)
   .middleware(Authorization)
 

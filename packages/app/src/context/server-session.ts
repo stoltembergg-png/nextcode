@@ -12,6 +12,7 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import type { FileDiffInfo } from "@opencode-ai/client/promise"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import { batch } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { message as cleanMessage } from "@/utils/diffs"
@@ -32,6 +33,7 @@ const initialMessagePageSize = 20
 const historyMessagePageSize = 200
 const sessionInfoLimit = 2_048
 const emptyIDs: ReadonlySet<string> = new Set()
+const routingActivityKey = (assistantMessageID: string, toolCallID: string) => `${assistantMessageID}\u0000${toolCallID}`
 
 function needsOlderTurnRoot(source: readonly SessionMessageInfo[]) {
   const boundary = source.find(
@@ -198,6 +200,8 @@ export function createServerSession(
     info: {} as Record<string, Session | undefined>,
     session_status: {} as Record<string, SessionStatus>,
     session_diff: {} as Record<string, FileDiffInfo[]>,
+    omo_routing_activity: {} as Record<string, Record<string, OmoRoutingEvent.OmoRoutingActivity | undefined> | undefined>,
+    omo_routing_watermark: {} as Record<string, Record<string, number | undefined> | undefined>,
     todo: {} as Record<string, Todo[]>,
     permission: {} as Record<string, PermissionRequest[]>,
     question: {} as Record<string, QuestionRequest[]>,
@@ -221,6 +225,36 @@ export function createServerSession(
   let orphanGcTimer: ReturnType<typeof setTimeout> | undefined
   const removedMessages = new Map<string, Set<string>>()
   const deltaBases = new Map<string, { base: string; sessionID: string }>()
+  const assistantSettled = (sessionID: string, messageID: string) => {
+    const message = data.message[sessionID]?.find((item) => item.id === messageID)
+    return message?.role === "assistant" && (message.time.completed !== undefined || message.error !== undefined)
+  }
+  const clearRoutingMessage = (sessionID: string, messageID: string) => {
+    const prefix = routingActivityKey(messageID, "")
+    setData(
+      produce((draft) => {
+        for (const key of Object.keys(draft.omo_routing_activity[sessionID] ?? {})) {
+          if (!key.startsWith(prefix)) continue
+          delete draft.omo_routing_activity[sessionID]?.[key]
+          delete draft.omo_routing_watermark[sessionID]?.[key]
+        }
+      }),
+    )
+  }
+  const clearRoutingSession = (sessionID: string) =>
+    setData(
+      produce((draft) => {
+        delete draft.omo_routing_activity[sessionID]
+        delete draft.omo_routing_watermark[sessionID]
+      }),
+    )
+  const clearRoutingActivity = () =>
+    setData(
+      produce((draft) => {
+        draft.omo_routing_activity = {}
+        draft.omo_routing_watermark = {}
+      }),
+    )
   const deleteMessageParts = (
     cache: { part: Record<string, Part[] | undefined>; part_text_accum_delta: Record<string, string | undefined> },
     messageID: string,
@@ -671,10 +705,14 @@ export function createServerSession(
     }
   }
 
-  const replaceMessages = (sessionID: string, messages: Message[]) => {
+  const replaceMessages = (sessionID: string, messages: Message[], settledMessages: Message[] = messages) => {
     const messageIDs = new Set(messages.map((message) => message.id))
     const dropped = (data.message[sessionID] ?? []).filter((message) => !messageIDs.has(message.id))
     setData("message", sessionID, reconcile(messages, { key: "id" }))
+    settledMessages.forEach((message) => {
+      if (message.role === "assistant" && (message.time.completed !== undefined || message.error !== undefined))
+        clearRoutingMessage(sessionID, message.id)
+    })
     setData(
       produce((draft) => {
         for (const message of dropped) deleteMessageParts(draft, message.id)
@@ -781,7 +819,7 @@ export function createServerSession(
     })
     batch(() => {
       if (source) setData("session_message", sessionID, reconcile(source))
-      const messageIDs = replaceMessages(sessionID, messages)
+      const messageIDs = replaceMessages(sessionID, messages, merged.session)
       replaceParts(sessionID, merged.part, messageIDs, load)
       setMeta("limit", sessionID, messages.length)
       setMeta("cursor", sessionID, merged.cursor)
@@ -1024,8 +1062,10 @@ export function createServerSession(
       event.type === "session.execution.succeeded" ||
       event.type === "session.execution.failed" ||
       event.type === "session.execution.interrupted"
-    )
+    ) {
+      clearRoutingSession(sessionID)
       setData("session_status", sessionID, { type: "idle" })
+    }
     if (event.type === "session.retry.scheduled")
       setData("session_status", sessionID, {
         type: "retry",
@@ -1044,6 +1084,7 @@ export function createServerSession(
 
   const apply = (event: { type: string; properties?: unknown }) => {
     if (event.type === "socket.closed" || event.type === "server.disconnected" || event.type === "global.disposed") {
+      clearRoutingActivity()
       for (const [sessionID, orphans] of orphanParts) {
         setData(
           produce((draft) => {
@@ -1081,6 +1122,10 @@ export function createServerSession(
         void resolve(eventID).catch(() => {})
     }
     switch (event.type) {
+      case "server.connected":
+      case "server.disconnected":
+        clearRoutingActivity()
+        return
       case "session.created":
         remember((event.properties as { info: Session }).info)
         return
@@ -1109,12 +1154,31 @@ export function createServerSession(
       }
       case "session.status": {
         const props = event.properties as { sessionID: string; status: SessionStatus }
+        if (props.status.type === "idle") clearRoutingSession(props.sessionID)
         setData("session_status", props.sessionID, reconcile(props.status))
+        return
+      }
+      case "session.omo.routing": {
+        const activity = event.properties as OmoRoutingEvent.OmoRoutingActivity
+        const key = routingActivityKey(activity.assistantMessageID, activity.toolCallID)
+        const watermark = data.omo_routing_watermark[activity.sessionID]?.[key] ?? -1
+        if (activity.sequence <= watermark) return
+        if (assistantSettled(activity.sessionID, activity.assistantMessageID)) return
+        setData(
+          produce((draft) => {
+            const watermarks = (draft.omo_routing_watermark[activity.sessionID] ??= {})
+            watermarks[key] = activity.sequence
+            const activities = (draft.omo_routing_activity[activity.sessionID] ??= {})
+            activities[key] = activity.state.phase === "cleared" ? undefined : activity
+          }),
+        )
         return
       }
       case "message.updated": {
         const info = cleanMessage((event.properties as { info: Message }).info)
         indexLegacyMessage(info)
+        if (info.role === "assistant" && (info.time.completed !== undefined || info.error !== undefined))
+          clearRoutingMessage(info.sessionID, info.id)
         const load = messageLoads.get(info.sessionID)
         load?.touchedMessages.add(info.id)
         load?.removedMessages.delete(info.id)

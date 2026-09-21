@@ -1,0 +1,160 @@
+# Native OMO verification record
+
+Review date: 2026-09-20
+
+Platform: Windows, PowerShell, Bun 1.3.14 (x64)
+
+Branch: `native-omo`
+
+Native branch tip at evidence capture: `1711741459` (the evidence document and
+port-matrix updates are the following documentation-only commits).
+
+Upstream-sync base: `4084bc57bdc0b331fbce30a7d563ddb93ef4272c` (`chore: merge upstream dev`)
+
+The upstream source refs used by the merge were `origin/dev` at
+`ebb7b76eca82342642c78645109e865614533827` and `jevcode/dev` at
+`3f685f566a67da85b77c375dcd4508c096559da3`. The verification commands below
+were run from their package directories; no tests were run from the repository
+root.
+
+## Affected-package results
+
+The following records combine the final branch checks with the focused evidence
+attached to Tasks 1–15. A `pass` is not a claim that unrelated baseline suites
+are clean.
+
+| Package or surface | Exact command | Result |
+| --- | --- | --- |
+| Core | `packages/core: bun typecheck` | Pass. |
+| Core baseline tests | `packages/core: bun test --only-failures` | One known Windows quoting failure remains; this is a pre-existing platform-sensitive failure, not an OMO assertion failure. |
+| OpenCode | `packages/opencode: bun typecheck` | Pass. |
+| Focused OMO tests | `packages/opencode: bun test test/omo test/cli/debug-omo.test.ts` | Focused OMO evidence passed across the task runs: config/agent, strategy/router/deterministic, migration, legacy/V2 delegation, delegate tool, server-story, real-model contract, and packaged smoke. The packaged smoke regression file is 6/6. |
+| OpenCode full baseline | `packages/opencode: bun test --timeout 30000 --only-failures` | 3,659 pass, 58 skip, 1 todo, 76 known failures in Windows, fixture, and UI-sensitive baseline cases. This is recorded, not waived as a clean full-suite result. |
+| HTTP API | `packages/opencode: bun run test:httpapi` | 209 pass, 5 expected missing baseline cases. The five missing harness cases predate the OMO status route. |
+| Client generated surface | `packages/client: bun run check:generated` | Pass; generated client output is clean. |
+| Client tests | `packages/client: bun test --timeout 5000` | Pass. |
+| Client types | `packages/client: bun typecheck` | Pass. |
+| Session UI | `packages/session-ui: bun test` | Pass; the OMO message-part coverage is 10/10. |
+| Session UI types | `packages/session-ui: bun typecheck` | Pass. |
+| App unit/browser coverage | `packages/app: bun run test:unit`; `packages/app: bun run test:browser` | Affected OMO status/reducer coverage is 8/8; the recorded browser run passed. |
+| App typecheck | `packages/app: bun run typecheck` | Pass. |
+| App E2E typecheck | `packages/app: bun run typecheck:e2e` | Pass. |
+| OMO Playwright stories | `packages/app: bun x playwright test e2e/user-story/omo-routing-flow.spec.ts e2e/user-story/omo-conflict.spec.ts --reporter=line --repeat-each=10` | 20/20 story runs across ten repetitions, with isolated fixtures, exact child identity, conflict guidance, and no arbitrary waits. See [e2e-review.md](e2e-review.md). |
+| Desktop types | `packages/desktop: bun run typecheck` | Pass. |
+| Desktop renderer | `packages/desktop: bun run build:renderer-tauri` | Pass. |
+| Desktop tests | `packages/desktop: bun test` | Known environment failure while loading `node:sqlite`; this remains a baseline/runtime limitation. |
+| Windows Tauri shell smoke | `packages/desktop: bun run predev:tauri`; `cargo build --manifest-path src-tauri/Cargo.toml`; isolated `bun run smoke:omo` shell probe | Pass: the packaged sidecar started through the compiled desktop shell, V2 services completed, OMO status reported `enabled`, the SemIf mode was `off` for the controlled smoke, and `/instance/dispose` plus shell shutdown completed with exit code 0. |
+| macOS Tauri shell smoke | GitHub Actions `tauri-shell-macos.yml`, workflow dispatch on `native-omo` | Pass: run [35513839709](https://github.com/stoltembergg-png/nextcode/actions/runs/35513839709) completed in 5m31s; sidecar/runtime staging, renderer and Rust shell build, isolated OMO smoke, native menu/i18n/store assertions, and disposal/shutdown all passed. |
+| Controlled packaged smoke | `packages/opencode: bun run src/index.ts --pure debug omo-smoke --json` with SemIf disabled and isolated config/data/state directories | Pass on Windows: native agents discovered, foreground and background V2 services completed, active jobs returned to zero, and disposal evidence was true. No real-model download occurred. |
+| Real-model SemIf probe | `packages/opencode: bun run script/omo-real-model.ts` with the verified pinned model/runtime artifacts and `OMO_REAL_MODEL_REQUIRED=1` | Pass on Windows: lifecycle reached `disposed`, all six representative OMO tasks returned eligible choices, each decision had 16 option slots and finite scores, and the sidecar exited cleanly. |
+
+## Workflow and architecture guards
+
+The three workflow files were parsed successfully during the workflow review. The
+macOS shell workflow was also executed on the hosted runner after publishing
+`native-omo` and passed as run
+[35513839709](https://github.com/stoltembergg-png/nextcode/actions/runs/35513839709):
+
+```text
+.github/workflows/tauri-shell-windows.yml
+.github/workflows/tauri-shell-macos.yml
+.github/workflows/omo-real-model.yml
+```
+
+The bounded architectural searches were run exactly as follows:
+
+```text
+rg -n "from .*server|from .*opencode" packages/core/src/omo.ts packages/core/src/config/omo.ts packages/core/src/omo
+rg -n "SessionRunner|SessionExecution|session_input|SessionInput\.admit" packages/opencode/src/omo
+rg -n "oh-my-opencode-slim" packages --glob '!**/test/**'
+rg -n "OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS" packages/opencode/src/omo
+```
+
+Results:
+
+- Core OMO has no Server or legacy-runtime import.
+- The native OMO directory has no direct `SessionRunner`, `SessionExecution`,
+  inbox-table, or `SessionInput.admit` orchestration.
+- The legacy package name is limited to migration/conflict matching and related
+  compatibility boundaries; it is not a runtime dependency or plugin install.
+- Native background delegation has no dependency on
+  `OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`.
+
+## Generated artifacts and repository integrity
+
+The public OMO status contract was generated through the repository generators,
+not by editing generated files. The recorded idempotence checks are:
+
+```text
+packages/client: bun run check:generated
+repository root: bun ./packages/sdk/js/script/build.ts
+repository root: git diff --exit-code -- packages/client/src/generated packages/client/src/generated-effect packages/sdk/openapi.json packages/sdk/js/src/gen packages/sdk/js/src/v2/gen
+```
+
+The client check, legacy SDK generator, and generated-artifact diff were clean
+after the API work. The final Task 16 changes are documentation-only and do not
+alter generated output.
+
+The final documentation check is:
+
+```text
+git diff --check
+```
+
+It passes for the evidence changes. The upstream merge and generated metadata
+checks were also reviewed with `git diff --check` and repository metadata
+validation; no whitespace or object-integrity issue was found.
+
+## SemIf real-model boundary
+
+`packages/opencode/test/omo/real-model-contract.test.ts` verifies the offline
+contract: eligible slots, the 16-option bound, malformed/missing/ineligible
+answers, finite diagnostic scores, and sanitized lifecycle output.
+
+The pinned SemIf runtime/model workflow in `.github/workflows/omo-real-model.yml`
+remains deliberately **manual/nightly** for hosted execution. A Windows probe
+was also executed locally with the verified `LFM2-1.2B-Q4_K_M.gguf` artifact
+(730,893,248 bytes; SHA-256
+`55175400e3f509a9616227afeffd58d87e80b9f628a5d3d54ada884d85221fed`) and the
+locked `llama.cpp b11040` runtime. It reached `ready`, completed all six
+representative tasks, and disposed the sidecar cleanly. The workflow remains the
+cross-platform execution path and must stay redaction-safe for prompts, secrets,
+and local paths.
+
+## Scope boundary
+
+All in-scope rows in [port-matrix.md](port-matrix.md) are marked `implemented`
+only where a direct test or verification reference is present. The nine
+deferred rows remain `out-of-scope`: council orchestration, desktop companion,
+terminal multiplexer, interview/advanced runtime commands, prompt-transform
+hooks, bundled skill synchronization, SmartFetch, AST-grep distribution, and
+automatic synchronization with future OMO Slim releases.
+
+## SemIf routing feedback E2E follow-up
+
+Evidence date: 2026-09-21
+Workspace: isolated SemIf routing-feedback worktree
+
+The controlled browser story is
+`packages/app/e2e/user-story/omo-routing-feedback.spec.ts`. It covers the live
+SemIf phase sequence, deterministic and explicit labels, stale clear handling,
+competing tool calls, tab/session isolation, aborted-assistant and idle cleanup,
+cache eviction, and reconnect cleanup. See [e2e-review.md](e2e-review.md) for
+the implementation review.
+
+| Package or surface | Exact command | Result |
+| --- | --- | --- |
+| App E2E types | `packages/app: bun run typecheck:e2e` | Pass. |
+| App routing feedback E2E | `packages/app: $env:PATH = "$env:USERPROFILE\.bun\bin;$env:PATH"; bun x playwright test e2e/user-story/omo-routing-feedback.spec.ts --repeat-each=3 --reporter=line` | Pass: 27/27 on Chromium, no retries. |
+| Schema focused matrix | `packages/schema: bun test test/omo-routing-event.test.ts test/event-manifest.test.ts; bun typecheck` | Pass: 4 tests and typecheck. |
+| Core focused matrix | `packages/core: bun test test/omo.test.ts; bun typecheck` | Pass: 12 tests and typecheck. |
+| OpenCode focused matrix | `packages/opencode: bun test test/omo/routing-activity.test.ts test/omo/router.test.ts test/omo/delegate-tool.test.ts; bun typecheck` | Tests pass: 42 tests. Typecheck fails on six pre-existing provider diagnostics in `src/provider/provider.ts` and `src/server/routes/instance/httpapi/handlers/provider.ts`. |
+| Client focused matrix | `packages/client: bun run check:generated; bun typecheck` | Pass: generated output clean and typecheck. |
+| SDK focused matrix | `packages/sdk/js: bun typecheck` | Pass. |
+| Session UI focused matrix | `packages/session-ui: bun test src/components/thinking-status.test.ts; bun typecheck` | Pass: 2 tests and typecheck. |
+| UI focused matrix | `packages/ui: bun typecheck` | Pass. |
+| App focused matrix | `packages/app: bun test --conditions=solid --preload ./happydom.ts ./src/context/server-session.test.ts ./src/context/global-sync/session-cache.test.ts ./src/pages/session/timeline/omo-routing-status.test.ts ./src/pages/session/timeline/rows-current.test.ts ./src/pages/session/timeline/projection.test.ts; bun typecheck` | Tests pass: 102 tests. Typecheck fails on five pre-existing `src/context/models.tsx` diagnostics. |
+| Whitespace check | `repository root: git diff --check` | Pass. |
+
+The two recorded typecheck failures are outside Task 6 and must be resolved or
+accepted as baseline diagnostics before merge.

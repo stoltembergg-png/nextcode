@@ -40,6 +40,11 @@ import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { SemifService } from "@/semif/service"
+import { DelegationService } from "@/omo/delegation"
+import { OmoDelegateTool } from "@/omo/delegate-tool"
+import { OmoObservability } from "@/omo/observability"
+import { OmoRouter } from "@/omo/router"
+import { OmoStatus } from "@/omo/status"
 import { SemifObserveLive } from "@/semif/observe-live"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
@@ -68,6 +73,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
+import { ApplicationTools } from "@opencode-ai/core/tool/application-tools"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@opencode-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
@@ -99,6 +105,7 @@ import { providerHandlers } from "./handlers/provider"
 import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { semifHandlers } from "./handlers/semif"
+import { omoHandlers } from "./handlers/omo"
 import { sessionHandlers } from "./handlers/session"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
@@ -143,7 +150,7 @@ const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provi
 const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
-  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, semifHandlers]),
+  Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers, semifHandlers, omoHandlers]),
   Layer.provide(schemaErrorLayer),
   Layer.provide(httpApiAuthLayer),
 )
@@ -240,6 +247,7 @@ const app = LayerNode.group([
   SessionProjector.node,
   SessionStatus.node,
   BackgroundJob.node,
+  DelegationService.node,
   RuntimeFlags.node,
   EventV2Bridge.node,
   SessionRunState.node,
@@ -271,6 +279,11 @@ const app = LayerNode.group([
   ProjectCopy.node,
   PtyTicket.node,
   SemifService.node,
+  ApplicationTools.node,
+  OmoObservability.node,
+  OmoRouter.node,
+  OmoStatus.node,
+  OmoDelegateTool.node,
 ])
 
 export function createRoutes(

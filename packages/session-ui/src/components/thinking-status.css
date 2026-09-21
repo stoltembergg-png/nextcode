@@ -44,6 +44,10 @@
     overflow: hidden;
     white-space: nowrap;
   }
+
+  [data-slot="thinking-status-stat-elapsed"][aria-label] {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 [data-slot="thinking-status-stat-suffix"] {

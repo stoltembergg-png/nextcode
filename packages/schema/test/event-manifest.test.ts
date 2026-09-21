@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { FileSystem, Integration, Permission, Project, Reference, Session, Workspace } from "../src"
 import { EventManifest } from "../src/event-manifest"
 import { IdeEvent } from "../src/ide-event"
+import { OmoRoutingEvent } from "../src/omo-routing-event"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
 import { SessionV1 } from "../src/session-v1"
@@ -9,8 +10,8 @@ import { WorkspaceEvent } from "../src/workspace-event"
 
 describe("public event manifest", () => {
   test("owns the complete public event surface", () => {
-    expect(EventManifest.ServerDefinitions.length).toBe(55)
-    expect(EventManifest.Definitions.length).toBe(85)
+    expect(EventManifest.ServerDefinitions.length).toBe(59)
+    expect(EventManifest.Definitions.length).toBe(89)
     expect(SessionV1.Event.Definitions).toEqual([
       SessionV1.Event.Created,
       SessionV1.Event.Updated,
@@ -23,8 +24,8 @@ describe("public event manifest", () => {
       SessionV1.Event.Diff,
       SessionV1.Event.Error,
     ])
-    expect(EventManifest.Latest.size).toBe(85)
-    expect(EventManifest.Durable.size).toBe(32)
+    expect(EventManifest.Latest.size).toBe(89)
+    expect(EventManifest.Durable.size).toBe(35)
   })
 
   test("uses canonical definitions for current public events", () => {
@@ -42,11 +43,13 @@ describe("public event manifest", () => {
     expect(Reference.Event.Definitions).toEqual([Reference.Event.Updated])
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(IdeEvent.Definitions).toEqual([IdeEvent.Installed])
-    expect(EventManifest.Definitions.slice(40, 43)).toEqual([
-      SessionV1.Event.PartDelta,
-      SessionV1.Event.Diff,
-      SessionV1.Event.Error,
+    expect(EventManifest.Definitions.slice(40, 43).map((definition) => definition.type)).toEqual([
+      "session.next.revert.staged",
+      "session.next.revert.cleared",
+      "session.next.revert.committed",
     ])
+    expect(EventManifest.ServerDefinitions).toContain(OmoRoutingEvent.Updated)
+    expect(EventManifest.Definitions).toContain(OmoRoutingEvent.Updated)
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
   })

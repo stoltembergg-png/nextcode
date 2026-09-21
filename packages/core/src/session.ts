@@ -78,9 +78,16 @@ export type ListInput = typeof ListInput.Type
 
 type CreateInput = {
   id?: SessionSchema.ID
+  parentID?: SessionSchema.ID
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
+}
+
+type CreateChildInput = {
+  parentID: SessionSchema.ID
+  agent?: AgentV2.ID
+  model?: ModelV2.Ref
 }
 
 type CompactInput = {
@@ -112,7 +119,8 @@ export type Error = NotFoundError | MessageDecodeError | OperationUnavailableErr
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
-  readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
+  readonly create: (input: Omit<CreateInput, "parentID">) => Effect.Effect<SessionSchema.Info>
+  readonly createChild: (input: CreateChildInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
@@ -204,8 +212,7 @@ const layer = Layer.effect(
         ),
       )
 
-    const result = Service.of({
-      create: Effect.fn("V2Session.create")(function* (input) {
+    const create = Effect.fn("V2Session.create")(function* (input: CreateInput) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
         if (recorded) return recorded
@@ -219,6 +226,7 @@ const layer = Layer.effect(
         const now = Date.now()
         const info = SessionV1.SessionInfo.make({
           id: sessionID,
+          parentID: input.parentID,
           slug: Slug.create(),
           version: InstallationVersion,
           projectID: project.id,
@@ -259,7 +267,21 @@ const layer = Layer.effect(
         if (projected.type === "existing") return projected.session
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
-      }),
+      })
+    const createChild = Effect.fn("V2Session.createChild")(function* (input: CreateChildInput) {
+      const parent = yield* store.get(input.parentID)
+      if (!parent) return yield* new NotFoundError({ sessionID: input.parentID })
+      return yield* create({
+        parentID: parent.id,
+        location: parent.location,
+        agent: input.agent,
+        model: input.model,
+      })
+    })
+
+    const result = Service.of({
+      create,
+      createChild,
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })

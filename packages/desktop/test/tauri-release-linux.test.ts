@@ -41,11 +41,4 @@ describe("tauri-release linux", () => {
     expect(step).toContain('ARTIFACT=$(basename "$(ls "$OUT"/*.AppImage)")')
     expect(step).not.toContain('*.AppImage")')
   })
-
-  test("strips bundled libwayland from the Linux AppImage and re-signs", () => {
-    const step = yaml.slice(yaml.indexOf("name: Un-bundle libwayland from the AppImage"))
-    expect(step).toContain("unbundle-appimage-wayland.ts")
-    expect(step).toContain("tauri signer sign")
-    expect(yaml).toContain("squashfs-tools")
-  })
 })

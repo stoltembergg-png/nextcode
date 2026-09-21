@@ -216,13 +216,46 @@ fn semif_sidecar_env(app: &AppHandle) -> Option<Vec<(&'static str, String)>> {
     ])
 }
 
+/// Explicitly forwards the bounded set of smoke/runtime variables used by the
+/// packaged OMO contract. Tauri's shell command normally inherits the process
+/// environment, but keeping this list explicit prevents a future command
+/// builder or platform backend from silently dropping the isolated config.
+fn smoke_sidecar_env() -> Vec<(&'static str, String)> {
+    [
+        "NEXTCODE_SMOKE_CONFIG_DIR",
+        "OPENCODE_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "OPENCODE_DISABLE_MODELS_FETCH",
+        "OPENCODE_DISABLE_PROJECT_CONFIG",
+        "OPENCODE_DB",
+        "OPENCODE_PURE",
+        "SEMIF_MODE",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()).map(|value| (key, value)))
+    .collect()
+}
+
 /// Spawns the bundled opencode server as a sidecar and waits until it is healthy.
 /// Runs on a dedicated thread so the window can paint the loading state immediately.
 fn start_sidecar(app: &AppHandle) {
+    // CI smoke tests opt into stable credentials so the runner can authenticate
+    // against the dynamically allocated endpoint. Local runs keep a random
+    // password unless both values are explicitly provided.
+    let credentials = match (
+        std::env::var("NEXTCODE_SMOKE_USERNAME"),
+        std::env::var("NEXTCODE_SMOKE_PASSWORD"),
+    ) {
+        (Ok(username), Ok(password)) if !username.is_empty() && !password.is_empty() => (username, password),
+        _ => ("opencode".to_string(), uuid::Uuid::new_v4().to_string()),
+    };
     let endpoint = Endpoint {
         port: 0,
-        username: "opencode".to_string(),
-        password: uuid::Uuid::new_v4().to_string(),
+        username: credentials.0,
+        password: credentials.1,
     };
     let port = match free_port() {
         Ok(port) => port,
@@ -261,9 +294,14 @@ fn spawn_sidecar(app: &AppHandle, endpoint: Endpoint, attempt: u32) {
                 ])
                 .env("OPENCODE_SERVER_USERNAME", endpoint.username.clone())
                 .env("OPENCODE_SERVER_PASSWORD", endpoint.password.clone());
+            let command = smoke_sidecar_env()
+                .into_iter()
+                .fold(command, |command, (key, value)| command.env(key, value));
             let command = match &state_dir {
-                Some(dir) => command.env("XDG_STATE_HOME", dir.to_string_lossy().to_string()),
-                None => command,
+                Some(dir) if std::env::var_os("XDG_STATE_HOME").is_none() => {
+                    command.env("XDG_STATE_HOME", dir.to_string_lossy().to_string())
+                }
+                _ => command,
             };
             let command = match semif_sidecar_env(app) {
                 Some(env) => env.into_iter().fold(command, |command, (key, value)| command.env(key, value)),
@@ -1515,53 +1553,7 @@ fn write_debug_zip(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-fn host_libwayland_client() -> Option<std::path::PathBuf> {
-    const CANDIDATES: &[&str] = &[
-        "/usr/lib/x86_64-linux-gnu/libwayland-client.so.0",
-        "/lib/x86_64-linux-gnu/libwayland-client.so.0",
-        "/usr/lib64/libwayland-client.so.0",
-        "/usr/lib/libwayland-client.so.0",
-        "/lib64/libwayland-client.so.0",
-    ];
-    CANDIDATES.iter().map(std::path::PathBuf::from).find(|path| path.is_file())
-}
-
-#[cfg(target_os = "linux")]
-fn prepend_preload(wayland: &std::path::Path) -> String {
-    let wayland = wayland.to_string_lossy();
-    match std::env::var("LD_PRELOAD") {
-        Ok(existing) if !existing.is_empty() && existing.split(':').any(|part| part == wayland) => existing,
-        Ok(existing) if !existing.is_empty() => format!("{wayland}:{existing}"),
-        _ => wayland.into_owned(),
-    }
-}
-
 fn main() {
-    // WebKitGTK DMA-BUF + NVIDIA/AppImage EGL aborts the web process and leaves a gray
-    // window (EGL_BAD_PARAMETER). Set before the webview exists so WebKitWebProcess inherits it.
-    // https://v2.tauri.app/develop/debug/linux-graphics/  tauri-apps/tauri#9394
-    #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-        }
-        // linuxdeploy ships an older libwayland than host Mesa; WebKit then aborts with
-        // EGL_BAD_PARAMETER even after DMA-BUF is off. Force X11/XWayland for AppImage
-        // and preload the host client so WebKitWebProcess does not pick the bundled one.
-        if std::env::var_os("APPIMAGE").is_some() {
-            if std::env::var_os("GDK_BACKEND").is_none() {
-                std::env::set_var("GDK_BACKEND", "x11");
-            }
-            if let Some(wayland) = host_libwayland_client() {
-                std::env::set_var("LD_PRELOAD", prepend_preload(&wayland));
-            }
-        }
-    }
-
     // Surface shell panics in the log file as well: the default hook only writes to stderr, which
     // a packaged Windows build has no console for, so `export_debug_logs` would miss them. Keep the
     // default hook so the message still reaches stderr when a console exists.
@@ -1789,15 +1781,6 @@ fn main() {
             }
 
             restore_window_state(&handle);
-            #[cfg(target_os = "linux")]
-            log::info!(
-                "[window] linux webkit DMA-BUF={:?} compositing={:?} gdk={:?} preload={:?} appimage={}",
-                std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER"),
-                std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE"),
-                std::env::var_os("GDK_BACKEND"),
-                std::env::var_os("LD_PRELOAD"),
-                std::env::var_os("APPIMAGE").is_some()
-            );
 
             // Windows parity with Electron's `titleBarOverlay`: decorum draws the
             // native-style caption controls into `[data-tauri-decorum-tb]`.

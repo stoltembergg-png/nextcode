@@ -140,6 +140,85 @@ describe("v2 session reducer", () => {
     })
   })
 
+  test("keeps structured tool metadata for native OMO timeline provenance", () => {
+    const reducer = createV2SessionReducer()
+    let messages: SessionMessageInfo[] = []
+    const apply = (input: object) => {
+      const result = reducer.reduce(messages, event(input))
+      if (result) messages = result.messages
+    }
+
+    apply({
+      ...base,
+      id: "evt_step_omo",
+      type: "session.step.started",
+      data: {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_omo",
+        agent: "orchestrator",
+        model: { id: "model", providerID: "provider" },
+      },
+    })
+    apply({
+      ...base,
+      id: "evt_tool_start_omo",
+      type: "session.tool.input.started",
+      data: { sessionID: "ses_1", assistantMessageID: "msg_omo", callID: "call_omo", name: "omo_delegate" },
+    })
+    apply({
+      ...base,
+      id: "evt_tool_called_omo",
+      type: "session.tool.called",
+      data: {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_omo",
+        callID: "call_omo",
+        input: { description: "private prompt summary" },
+        executed: true,
+      },
+    })
+    apply({
+      ...base,
+      id: "evt_tool_success_omo",
+      type: "session.tool.success",
+      data: {
+        sessionID: "ses_1",
+        assistantMessageID: "msg_omo",
+        callID: "call_omo",
+        metadata: {
+          child_id: "ses_child_42",
+          state: "running",
+          agent: "fixer",
+          background: true,
+          verification: "tests",
+          source: "semif",
+        },
+        content: [{ type: "text", text: "background task started" }],
+        executed: true,
+      },
+    })
+
+    expect(messages[0]).toMatchObject({
+      content: [
+        {
+          type: "tool",
+          name: "omo_delegate",
+          state: {
+            status: "completed",
+            metadata: {
+              child_id: "ses_child_42",
+              state: "running",
+              agent: "fixer",
+              background: true,
+              verification: "tests",
+              source: "semif",
+            },
+          },
+        },
+      ],
+    })
+  })
+
   test("requests hydration when promotion admission was missed", () => {
     const result = createV2SessionReducer().reduce(
       [],

@@ -2,33 +2,20 @@ export * as AgentPlugin from "./agent"
 
 import path from "path"
 import { define } from "./internal"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { AgentV2 } from "../agent"
+import { Config } from "../config"
+import { ConfigOmo } from "../config/omo"
 import { Global } from "../global"
 import { Location } from "../location"
+import { ModelV2 } from "../model"
+import { agentDefinitions } from "../omo"
 import { PermissionV2 } from "../permission"
+import PROMPT_EXPLORE from "../omo/explore.txt"
 
 const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
 const BUILD_SYSTEM =
   "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
-
-const PROMPT_EXPLORE = `You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
-
-Your strengths:
-- Rapidly finding files using glob patterns
-- Searching code and text with powerful regex patterns
-- Reading and analyzing file contents
-
-Guidelines:
-- Use Glob for broad file pattern matching
-- Use Grep for searching file contents with regex
-- Use Read when you know the specific file path you need to read
-- Adapt your search approach based on the thoroughness level specified by the caller
-- Return file paths as absolute paths in your final response
-- For clear communication, avoid using emojis
-- Do not create any files, or run bash commands that modify the user's system state in any way
-
-Complete the user's search request efficiently and report your findings clearly.`
 
 const PROMPT_COMPACTION = `You are a context summarization agent. You are given a conversation between a user and an agent. Your goal is to produce a structured summary matching the format specified so another coding agent can continue the work.
 
@@ -98,6 +85,16 @@ export const Plugin = define({
   effect: Effect.fn(function* (ctx) {
     const location = yield* Location.Service
     const worktree = location.directory
+    const config = yield* Effect.serviceOption(Config.Service)
+    const entries = Option.isSome(config) ? yield* config.value.entries() : []
+    const documents = entries.filter((entry): entry is Config.Document => entry.type === "document")
+    const resolvedOmo = Option.isSome(config)
+      ? ConfigOmo.resolve(Config.latest(documents, "omo"))
+      : undefined
+    const legacyConflict = Option.isSome(config)
+      ? ConfigOmo.hasLegacyPluginConflict(documents.flatMap((document) => document.info.plugins ?? []))
+      : false
+    const configuredDefault = Option.isSome(config) ? Config.latest(documents, "default_agent") : undefined
     const whitelistedDirs = [TRUNCATION_GLOB, path.join(Global.Path.tmp, "*")]
     const readonlyExternalDirectory: PermissionV2.Ruleset = [
       { action: "external_directory", resource: "*", effect: "ask" },
@@ -176,6 +173,41 @@ export const Plugin = define({
           ),
         )
       })
+
+      if (resolvedOmo?.info.enabled && !legacyConflict) {
+        const definitions = agentDefinitions(resolvedOmo.info)
+        if (!definitions.some((definition) => definition.id === "explore")) {
+          draft.remove(AgentV2.ID.make("explore"))
+        }
+        for (const definition of definitions) {
+          const variant = definition.variant === undefined ? undefined : ModelV2.VariantID.make(definition.variant)
+          draft.update(AgentV2.ID.make(definition.id), (item) => {
+            item.description = definition.description
+            item.system = definition.prompt
+            item.mode = definition.mode
+            AgentV2.setNativeVariant(item, variant)
+            item.permissions.push(
+              ...PermissionV2.merge(
+                defaults,
+                definition.permissions.map((rule) => ({ ...rule })),
+                readonlyExternalDirectory,
+                definition.permissionOverrides?.map((rule) => ({ ...rule })) ?? [],
+              ),
+            )
+            if (definition.model !== undefined) {
+              const model = ModelV2.parse(definition.model)
+              item.model = {
+                id: model.modelID,
+                providerID: model.providerID,
+                ...(variant === undefined ? {} : { variant }),
+              }
+            } else if (variant !== undefined && item.model !== undefined) {
+              item.model.variant = variant
+            }
+          })
+        }
+        if (configuredDefault === undefined) draft.default(AgentV2.ID.make("orchestrator"))
+      }
 
       draft.update(AgentV2.ID.make("compaction"), (item) => {
         item.mode = "primary"

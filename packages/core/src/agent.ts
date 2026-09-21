@@ -3,6 +3,7 @@ export * as AgentV2 from "./agent"
 import { makeLocationNode } from "./effect/app-node"
 import { Array, Context, Effect, Layer, Types } from "effect"
 import { Agent } from "@opencode-ai/schema/agent"
+import { ModelV2 } from "./model"
 import { State } from "./state"
 
 export const ID = Agent.ID
@@ -13,6 +14,22 @@ export const Color = Agent.Color
 
 export const Info = Agent.Info
 export type Info = Agent.Info
+
+const NativeVariant = Symbol("AgentV2.NativeVariant")
+type MutableInfo = Types.DeepMutable<Info> & { [NativeVariant]?: ModelV2.VariantID }
+
+export function nativeVariant(agent: object): ModelV2.VariantID | undefined {
+  return (agent as { [NativeVariant]?: ModelV2.VariantID })[NativeVariant]
+}
+
+export function setNativeVariant(agent: object, variant: ModelV2.VariantID | undefined) {
+  const target = agent as MutableInfo
+  if (variant === undefined) {
+    delete target[NativeVariant]
+    return
+  }
+  target[NativeVariant] = variant
+}
 
 export interface Selection {
   readonly id: ID

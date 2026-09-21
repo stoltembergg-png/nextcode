@@ -41,10 +41,10 @@ import { DialogFooter, DialogHeader, DialogTitleGroup, DialogV2 } from "@opencod
 import { InlineInput } from "@opencode-ai/ui/inline-input"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { SessionRetry } from "@opencode-ai/session-ui/session-retry"
+import { ThinkingStatus } from "@opencode-ai/session-ui/thinking-status"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@opencode-ai/ui/scroll-view"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { ThinkingStatus } from "@opencode-ai/session-ui/thinking-status"
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -52,6 +52,7 @@ import type {
   ToolPart,
   UserMessage,
 } from "@opencode-ai/sdk/v2"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import { showToast } from "@/utils/toast"
 import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from "@/utils/session-export"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
@@ -76,6 +77,7 @@ import { scheduleConnectedMeasure } from "./measure"
 import { observeElementOffsetReconnectAware } from "./observe-element-offset"
 import { createTimelineProjection } from "./projection"
 import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows"
+import { routingStatusLabel } from "./omo-routing-status"
 import { filterVirtualIndexes } from "./virtual-items"
 
 const emptyMessages: MessageType[] = []
@@ -129,8 +131,23 @@ const markBoundaryGesture = (input: {
   }
 }
 
-function TimelineThinkingRow() {
-  return <ThinkingStatus active pendingMessage={undefined} parts={[]} />
+function TimelineThinkingRow(props: {
+  routingActivity?: OmoRoutingEvent.OmoRoutingActivity
+  startedAt?: number
+}) {
+  const language = useLanguage()
+  return (
+    <div data-slot="session-turn-thinking">
+      <ThinkingStatus
+        active
+        pendingMessage={undefined}
+        parts={[]}
+        label={props.routingActivity ? routingStatusLabel(props.routingActivity, language.t) : undefined}
+        startedAt={props.routingActivity?.startedAt ?? props.startedAt}
+        details={props.routingActivity ? "elapsed" : undefined}
+      />
+    </div>
+  )
 }
 
 function TimelineDiffSummaryRow(props: { diffs: SummaryDiff[] }) {
@@ -272,6 +289,13 @@ export function MessageTimeline(props: {
     return sync().data.session_status[id] ?? idle
   })
   const sessionMessages = createMemo(() => (sessionID() ? (sync().data.message[sessionID()!] ?? []) : []))
+  const routingActivities = createMemo(() => {
+    const id = sessionID()
+    if (!id) return []
+    return Object.values(sync().data.omo_routing_activity[id] ?? {}).filter(
+      (activity): activity is OmoRoutingEvent.OmoRoutingActivity => activity !== undefined,
+    )
+  })
   const projectedMessages = createMemo(() => {
     const id = sessionID()
     if (!id) return []
@@ -329,6 +353,7 @@ export function MessageTimeline(props: {
     status: sessionStatus,
     showReasoningSummaries: settings.general.showReasoningSummaries,
     inlineComments: settings.general.newLayoutDesigns,
+    routingActivities,
   })
   const activeMessageID = projection.activeMessageID
   const assistantMessagesByParent = projection.assistantMessagesByParent
@@ -1174,7 +1199,14 @@ export function MessageTimeline(props: {
         return (
           <TimelineRowFrame row={thinkingRow}>
             <div data-slot="session-turn-message-container" class="w-full px-4 md:px-5">
-              <TimelineThinkingRow />
+              <TimelineThinkingRow
+                routingActivity={thinkingRow().routingActivity}
+                startedAt={
+                  thinkingRow().routingActivity?.startedAt ??
+                  assistantMessagesByParent().get(thinkingRow().userMessageID)?.at(-1)?.time.created ??
+                  messageByID().get(thinkingRow().userMessageID)?.time.created
+                }
+              />
             </div>
           </TimelineRowFrame>
         )

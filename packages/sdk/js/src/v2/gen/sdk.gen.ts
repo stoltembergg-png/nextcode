@@ -113,6 +113,8 @@ import type {
   McpStatusResponses,
   ModelRef,
   MoveSessionDestination,
+  OmoStatusErrors,
+  OmoStatusResponses,
   OutputFormat,
   Part as Part2,
   PartDeleteErrors,
@@ -1425,6 +1427,20 @@ export class Semif extends HeyApiClient {
   public acquire<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).post<SemifAcquireResponses, SemifAcquireErrors, ThrowOnError>({
       url: "/semif/acquire",
+      ...options,
+    })
+  }
+}
+
+export class Omo extends HeyApiClient {
+  /**
+   * Get native OMO status
+   *
+   * Get native OMO availability, configured agents, global SemIf state, legacy plugin conflicts, and the latest sanitized routing failure.
+   */
+  public status<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<OmoStatusResponses, OmoStatusErrors, ThrowOnError>({
+      url: "/omo/status",
       ...options,
     })
   }
@@ -7227,6 +7243,11 @@ export class OpencodeClient extends HeyApiClient {
   private _semif?: Semif
   get semif(): Semif {
     return (this._semif ??= new Semif({ client: this.client }))
+  }
+
+  private _omo?: Omo
+  get omo(): Omo {
+    return (this._omo ??= new Omo({ client: this.client }))
   }
 
   private _event?: Event

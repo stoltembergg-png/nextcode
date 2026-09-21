@@ -1,6 +1,7 @@
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
 import { AssistantMessage, Part, SessionStatus, UserMessage } from "@opencode-ai/sdk/v2"
+import type { OmoRoutingEvent } from "@opencode-ai/schema/omo-routing-event"
 import { groupParts, renderable, type PartGroup } from "@opencode-ai/session-ui/message-part"
 import { TimelineRow, type SummaryDiff } from "./timeline-row"
 import { uniqueSummaryDiffs } from "./summary-diffs"
@@ -26,7 +27,7 @@ export type TimelineRowMap = {
     group: PartGroup
     previousAssistantPart: boolean
   }
-  Thinking: { userMessageID: string; reasoningHeading?: string }
+  Thinking: { userMessageID: string; reasoningHeading?: string; routingActivity?: OmoRoutingEvent.OmoRoutingActivity }
   Retry: { userMessageID: string }
   DiffSummary: { userMessageID: string; diffs: SummaryDiff[] }
   Error: { userMessageID: string; text: string }
@@ -41,6 +42,7 @@ export namespace Timeline {
     status: SessionStatus["type"],
     inlineComments: boolean,
     projectedUserMessages: UserMessage[],
+    routingActivities: readonly OmoRoutingEvent.OmoRoutingActivity[] = [],
   ) {
     const turns: { user: UserMessage; assistants: AssistantMessage[] }[] = []
     const turnByUserID = new Map<string, (typeof turns)[number]>()
@@ -93,6 +95,7 @@ export namespace Timeline {
           status,
           turn.user.id === activeMessageID,
           inlineComments,
+          routingActivities,
         ),
       ),
     }
@@ -108,6 +111,7 @@ export namespace Timeline {
     isActive: boolean,
     // v2 renders comments inside the user message attachments row instead of a strip row
     inlineComments: boolean,
+    routingActivities: readonly OmoRoutingEvent.OmoRoutingActivity[] = [],
   ) {
     const rows: TimelineRow.TimelineRow[] = []
 
@@ -193,8 +197,9 @@ export namespace Timeline {
     const hasReasoning = assistantMessages.some((message) =>
       getMessageParts(message.id).some((part) => part.type === "reasoning" && !!part.text?.trim()),
     )
+    const routingActivity = latestRoutingActivity(routingActivities, userMessage, assistantMessages)
     if (isActive && status === "busy" && !error && !hasReasoning) {
-      rows.push(new TimelineRow.Thinking({ userMessageID: userMessage.id }))
+      rows.push(new TimelineRow.Thinking({ userMessageID: userMessage.id, routingActivity }))
     }
 
     if (isActive && status === "retry") rows.push(new TimelineRow.Retry({ userMessageID: userMessage.id }))
@@ -222,6 +227,26 @@ export namespace Timeline {
     }
 
     return rows
+  }
+
+  function latestRoutingActivity(
+    routingActivities: readonly OmoRoutingEvent.OmoRoutingActivity[],
+    userMessage: UserMessage,
+    assistantMessages: AssistantMessage[],
+  ) {
+    const assistantMessageIDs = new Set(assistantMessages.map((message) => message.id))
+    const userMessageCreatedAt = userMessage.time.created
+    const latest = (matches: (activity: OmoRoutingEvent.OmoRoutingActivity) => boolean) =>
+      routingActivities.reduce<OmoRoutingEvent.OmoRoutingActivity | undefined>((result, activity) => {
+        if (activity.sessionID !== userMessage.sessionID || activity.state.phase === "cleared" || !matches(activity))
+          return result
+        if (!result || activity.updatedAt > result.updatedAt) return activity
+        return result
+      }, undefined)
+    const exact = latest((activity) => assistantMessageIDs.has(activity.assistantMessageID))
+    if (exact) return exact
+    if (typeof userMessageCreatedAt !== "number") return
+    return latest((activity) => activity.startedAt >= userMessageCreatedAt)
   }
 
   function unwrapErrorMessage(message: string) {
