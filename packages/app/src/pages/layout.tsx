@@ -1708,7 +1708,7 @@ export default function LegacyLayout(props: ParentProps) {
   })
 
   const side = createMemo(() => Math.max(layout.sidebar.width(), 244))
-  const panel = createMemo(() => Math.max(side() - 64, 0))
+  const panel = createMemo(() => Math.max(side() - 48, 0))
 
   const loadedSessionDirs = new Set<string>()
 
@@ -2217,7 +2217,6 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const projects = () => layout.projects.list()
-  const projectOverlay = () => <ProjectDragOverlay projects={projects} activeProject={() => store.activeProject} />
   const sidebarContent = (mobile?: boolean) => (
     <SidebarContent
       mobile={mobile}
@@ -2233,7 +2232,9 @@ export default function LegacyLayout(props: ParentProps) {
       openProjectLabel={language.t("command.project.open")}
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
-      renderProjectOverlay={projectOverlay}
+      renderProjectOverlay={() => (
+        <ProjectDragOverlay mobile={mobile} projects={projects} activeProject={() => store.activeProject} />
+      )}
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}
@@ -2297,7 +2298,7 @@ export default function LegacyLayout(props: ParentProps) {
                   direction="horizontal"
                   size={layout.sidebar.width()}
                   min={244}
-                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + 64}
+                  max={typeof window === "undefined" ? 1000 : window.innerWidth * 0.3 + 48}
                   onResize={(w) => {
                     setState("sizing", true)
                     if (sizet !== undefined) clearTimeout(sizet)
@@ -2310,7 +2311,7 @@ export default function LegacyLayout(props: ParentProps) {
 
             <div
               class="hidden xl:block pointer-events-none absolute top-0 end-0 z-0 border-t border-border-weaker-base"
-              style={{ "inset-inline-start": "calc(4rem + 12px)" }}
+              style={{ "inset-inline-start": "calc(3rem + 12px)" }}
             />
 
             <div class="xl:hidden">
@@ -2347,7 +2348,7 @@ export default function LegacyLayout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                "--main-left": layout.sidebar.opened() ? `${side()}px` : "3rem",
               }}
             >
               <main
@@ -2363,7 +2364,7 @@ export default function LegacyLayout(props: ParentProps) {
 
             <div
               classList={{
-                "hidden xl:flex absolute inset-y-0 start-16 z-30": true,
+                "hidden xl:flex absolute inset-y-0 start-12 z-30": true,
                 "opacity-100 translate-x-0 pointer-events-auto": state.peeked && !layout.sidebar.opened(),
                 "opacity-0 ltr:-translate-x-2 rtl:translate-x-2 pointer-events-none":
                   !state.peeked || layout.sidebar.opened(),
@@ -2395,7 +2396,7 @@ export default function LegacyLayout(props: ParentProps) {
                 "duration-180 ease-out": state.peeked && !layout.sidebar.opened(),
                 "duration-120 ease-in": !state.peeked || layout.sidebar.opened(),
               }}
-              style={{ "inset-inline-start": `calc(4rem + ${panel()}px)` }}
+              style={{ "inset-inline-start": `calc(3rem + ${panel()}px)` }}
             >
               <div class="h-full w-px" style={{ "box-shadow": "var(--shadow-sidebar-overlay)" }} />
             </div>

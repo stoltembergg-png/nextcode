@@ -3,6 +3,7 @@ import { Avatar } from "@opencode-ai/ui/avatar"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { getFilename } from "@opencode-ai/core/util/path"
@@ -21,6 +22,7 @@ import { childSessionOnPath, getProjectAvatarSource, hasProjectPermissions } fro
 export const ProjectIcon = (props: {
   project: LocalProject
   class?: string
+  mobile?: boolean
   notify?: boolean
   working?: boolean
 }): JSX.Element => {
@@ -44,7 +46,7 @@ export const ProjectIcon = (props: {
   const name = createMemo(() => props.project.name || getFilename(props.project.worktree))
 
   return (
-    <div class={`relative size-8 shrink-0 rounded ${props.class ?? ""}`}>
+    <div class={`relative shrink-0 rounded ${props.mobile ? "size-8" : "size-7"} ${props.class ?? ""}`}>
       <div class="size-full rounded overflow-clip">
         <Avatar
           fallback={name()}
@@ -109,7 +111,7 @@ const SessionRow = (props: {
   return (
     <A
       href={`/${props.slug}/session/${props.session.id}`}
-      class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
+      class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.mobile && !props.dense ? "py-1" : "py-0.5"}`}
       onPointerDown={props.warmPress}
       onFocus={props.warmFocus}
       onClick={() => {
@@ -220,7 +222,7 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
       <div
         data-session-id={props.session.id}
         class="group/session relative w-full min-w-0 rounded-md cursor-default pr-3 transition-colors hover:bg-surface-raised-base-hover [&:has(:focus-visible)]:bg-surface-raised-base-hover has-[[data-expanded]]:bg-surface-raised-base-hover has-[.active]:bg-surface-base-active"
-        style={{ "padding-left": `${8 + (props.level ?? 0) * 16}px` }}
+        style={{ "padding-left": `${8 + (props.level ?? 0) * (props.mobile ? 16 : 12)}px` }}
       >
         <div class="flex min-w-0 items-center gap-1">
           <div class="min-w-0 flex-1">
@@ -252,17 +254,34 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
               }}
             >
               <Tooltip value={language.t("common.archive")} placement="top">
-                <IconButton
-                  icon="archive"
-                  variant="ghost"
-                  class="size-6 rounded-md"
-                  aria-label={language.t("common.archive")}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    void props.archiveSession(props.session)
-                  }}
-                />
+                <Show
+                  when={!props.mobile}
+                  fallback={
+                    <IconButton
+                      icon="archive"
+                      variant="ghost"
+                      class="size-6 rounded-md"
+                      aria-label={language.t("common.archive")}
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        void props.archiveSession(props.session)
+                      }}
+                    />
+                  }
+                >
+                  <IconButtonV2
+                    icon={<IconV2 name="archive" size="small" />}
+                    variant="ghost"
+                    size="small"
+                    aria-label={language.t("common.archive")}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void props.archiveSession(props.session)
+                    }}
+                  />
+                </Show>
               </Tooltip>
             </div>
           </Show>
@@ -294,7 +313,7 @@ export const NewSessionItem = (props: {
     <A
       href={`/${props.slug}/session`}
       end
-      class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.dense ? "py-0.5" : "py-1"}`}
+      class={`flex items-center gap-2 min-w-0 w-full text-left focus:outline-none ${props.mobile && !props.dense ? "py-1" : "py-0.5"}`}
       onClick={() => {
         if (layout.sidebar.opened()) return
         props.clearHoverProjectSoon()
