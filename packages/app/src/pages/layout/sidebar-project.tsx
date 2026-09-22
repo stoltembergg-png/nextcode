@@ -35,6 +35,7 @@ export type ProjectSidebarContext = {
 }
 
 export const ProjectDragOverlay = (props: {
+  mobile?: boolean
   projects: Accessor<LocalProject[]>
   activeProject: Accessor<string | undefined>
 }): JSX.Element => {
@@ -43,7 +44,7 @@ export const ProjectDragOverlay = (props: {
     <Show when={project()}>
       {(p) => (
         <div class="bg-background-base rounded-xl p-1">
-          <ProjectIcon project={p()} />
+          <ProjectIcon project={p()} mobile={props.mobile} />
         </div>
       )}
     </Show>
@@ -144,7 +145,7 @@ const ProjectTile = (props: {
         }}
         onBlur={() => props.setOpen(false)}
       >
-        <ProjectIcon project={props.project} notify working={props.isWorking()} />
+        <ProjectIcon project={props.project} mobile={props.mobile} notify working={props.isWorking()} />
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content>

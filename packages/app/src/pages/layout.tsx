@@ -2217,7 +2217,6 @@ export default function LegacyLayout(props: ParentProps) {
   }
 
   const projects = () => layout.projects.list()
-  const projectOverlay = () => <ProjectDragOverlay projects={projects} activeProject={() => store.activeProject} />
   const sidebarContent = (mobile?: boolean) => (
     <SidebarContent
       mobile={mobile}
@@ -2233,7 +2232,9 @@ export default function LegacyLayout(props: ParentProps) {
       openProjectLabel={language.t("command.project.open")}
       openProjectKeybind={() => command.keybind("project.open")}
       onOpenProject={chooseProject}
-      renderProjectOverlay={projectOverlay}
+      renderProjectOverlay={() => (
+        <ProjectDragOverlay mobile={mobile} projects={projects} activeProject={() => store.activeProject} />
+      )}
       settingsLabel={() => language.t("sidebar.settings")}
       settingsKeybind={() => command.keybind("settings.open")}
       onOpenSettings={openSettings}

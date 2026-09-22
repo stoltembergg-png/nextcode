@@ -21,6 +21,7 @@ import { childSessionOnPath, getProjectAvatarSource, hasProjectPermissions } fro
 export const ProjectIcon = (props: {
   project: LocalProject
   class?: string
+  mobile?: boolean
   notify?: boolean
   working?: boolean
 }): JSX.Element => {
@@ -44,7 +45,7 @@ export const ProjectIcon = (props: {
   const name = createMemo(() => props.project.name || getFilename(props.project.worktree))
 
   return (
-    <div class={`relative size-8 shrink-0 rounded ${props.class ?? ""}`}>
+    <div class={`relative shrink-0 rounded ${props.mobile ? "size-8" : "size-7"} ${props.class ?? ""}`}>
       <div class="size-full rounded overflow-clip">
         <Avatar
           fallback={name()}
