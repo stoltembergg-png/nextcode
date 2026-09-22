@@ -192,7 +192,7 @@ const ProjectPreviewPanel = (props: {
   selected: Accessor<boolean>
   workspaceEnabled: Accessor<boolean>
   workspaces: Accessor<string[]>
-  label: (directory: string) => string
+  title: (directory: string) => string
   projectSessions: Accessor<ReturnType<typeof sortedRootSessions>>
   workspaceSessions: (directory: string) => ReturnType<typeof sortedRootSessions>
   ctx: ProjectSidebarContext
@@ -229,9 +229,14 @@ const ProjectPreviewPanel = (props: {
               <div class="flex flex-col gap-1">
                 <div class="px-2 py-0.5 flex items-center gap-1 min-w-0">
                   <div class="shrink-0 size-6 flex items-center justify-center">
-                    <Icon name="branch" size="small" class="text-icon-base" />
+                    <Icon name="branch" size="small" class="text-icon-weak" />
                   </div>
-                  <span class="truncate text-14-medium text-text-base">{props.label(directory)}</span>
+                  <span class="shrink-0 text-12-medium text-text-weak">
+                    {directory === props.project.worktree
+                      ? props.language.t("workspace.type.local")
+                      : props.language.t("workspace.type.sandbox")}
+                  </span>
+                  <span class="min-w-0 truncate text-12-medium text-text-base">{props.title(directory)}</span>
                 </div>
                 <For each={sessions().slice(0, 2)}>
                   {(session) => (
@@ -294,12 +299,9 @@ export const SortableProject = (props: {
 
   const hoverOpen = () => isHoverProject() && preview() && !selected() && !state.menu
 
-  const label = (directory: string) => {
+  const workspaceTitle = (directory: string) => {
     const [data] = serverSync().child(directory, { bootstrap: false })
-    const kind =
-      directory === props.project.worktree ? language.t("workspace.type.local") : language.t("workspace.type.sandbox")
-    const name = props.ctx.workspaceLabel(directory, data.vcs?.branch, props.project.id)
-    return `${kind} : ${name}`
+    return props.ctx.workspaceLabel(directory, data.vcs?.branch, props.project.id)
   }
 
   const projectStore = createMemo(() => serverSync().child(props.project.worktree, { bootstrap: false })[0])
@@ -365,7 +367,7 @@ export const SortableProject = (props: {
             selected={selected}
             workspaceEnabled={workspaceEnabled}
             workspaces={workspaces}
-            label={label}
+            title={workspaceTitle}
             projectSessions={projectSessions}
             workspaceSessions={workspaceSessions}
             ctx={props.ctx}

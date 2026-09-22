@@ -97,45 +97,59 @@ const WorkspaceHeader = (props: {
   renameWorkspace: WorkspaceSidebarContext["renameWorkspace"]
   setEditor: WorkspaceSidebarContext["setEditor"]
   projectId?: string
-}): JSX.Element => (
-  <div class="flex items-center gap-1 min-w-0 flex-1">
-    <div class="flex items-center justify-center shrink-0 size-6">
-      <Show when={props.busy()} fallback={<Icon name="branch" size="small" />}>
-        <Spinner class="size-[15px]" />
+  mobile?: boolean
+}): JSX.Element => {
+  const kindClass = props.mobile
+    ? "text-14-medium text-text-base shrink-0"
+    : "text-12-medium text-text-weak shrink-0"
+  const nameClass = props.mobile
+    ? "text-14-medium text-text-base min-w-0 truncate"
+    : "text-12-medium text-text-base min-w-0 truncate"
+
+  return (
+    <div class="flex items-center gap-1 min-w-0 flex-1">
+      <div class="flex items-center justify-center shrink-0 size-6">
+        <Show
+          when={props.busy()}
+          fallback={
+            <Icon name="branch" size="small" class={props.mobile ? undefined : "text-icon-weak"} />
+          }
+        >
+          <Spinner class="size-[15px]" />
+        </Show>
+      </div>
+      <span class={kindClass}>
+        {props.local() ? props.language.t("workspace.type.local") : props.language.t("workspace.type.sandbox")}
+        {props.mobile ? " :" : ""}
+      </span>
+      <Show
+        when={!props.local()}
+        fallback={
+          <span class={nameClass}>{props.branch() ?? getFilename(props.directory)}</span>
+        }
+      >
+        <props.InlineEditor
+          id={`workspace:${props.directory}`}
+          value={props.workspaceValue}
+          onSave={(next) => {
+            const trimmed = next.trim()
+            if (!trimmed) return
+            props.renameWorkspace(props.directory, trimmed, props.projectId, props.branch())
+            props.setEditor("value", props.workspaceValue())
+          }}
+          class={nameClass}
+          displayClass={nameClass}
+          editing={props.workspaceEditActive()}
+          stopPropagation={false}
+          openOnDblClick={false}
+        />
       </Show>
+      <div class="flex items-center justify-center shrink-0 overflow-hidden w-0 opacity-0 transition-all duration-200 group-hover/workspace:w-3.5 group-hover/workspace:opacity-100 group-focus-within/workspace:w-3.5 group-focus-within/workspace:opacity-100">
+        <Icon name={props.open() ? "chevron-down" : "chevron-right"} size="small" class="text-icon-base" />
+      </div>
     </div>
-    <span class="text-14-medium text-text-base shrink-0">
-      {props.local() ? props.language.t("workspace.type.local") : props.language.t("workspace.type.sandbox")} :
-    </span>
-    <Show
-      when={!props.local()}
-      fallback={
-        <span class="text-14-medium text-text-base min-w-0 truncate">
-          {props.branch() ?? getFilename(props.directory)}
-        </span>
-      }
-    >
-      <props.InlineEditor
-        id={`workspace:${props.directory}`}
-        value={props.workspaceValue}
-        onSave={(next) => {
-          const trimmed = next.trim()
-          if (!trimmed) return
-          props.renameWorkspace(props.directory, trimmed, props.projectId, props.branch())
-          props.setEditor("value", props.workspaceValue())
-        }}
-        class="text-14-medium text-text-base min-w-0 truncate"
-        displayClass="text-14-medium text-text-base min-w-0 truncate"
-        editing={props.workspaceEditActive()}
-        stopPropagation={false}
-        openOnDblClick={false}
-      />
-    </Show>
-    <div class="flex items-center justify-center shrink-0 overflow-hidden w-0 opacity-0 transition-all duration-200 group-hover/workspace:w-3.5 group-hover/workspace:opacity-100 group-focus-within/workspace:w-3.5 group-focus-within/workspace:opacity-100">
-      <Icon name={props.open() ? "chevron-down" : "chevron-right"} size="small" class="text-icon-base" />
-    </div>
-  </div>
-)
+  )
+}
 
 const WorkspaceActions = (props: {
   directory: string
@@ -349,6 +363,7 @@ export const SortableWorkspace = (props: {
       renameWorkspace={props.ctx.renameWorkspace}
       setEditor={props.ctx.setEditor}
       projectId={props.project.id}
+      mobile={props.mobile}
     />
   )
 
