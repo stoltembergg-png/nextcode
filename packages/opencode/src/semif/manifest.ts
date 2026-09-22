@@ -58,18 +58,22 @@ const LFM2_1_2B: Entry = {
   aliases: ["LFM2-1.2B"],
 }
 
-const DEEPSEEK_R1_1_5B: Entry = {
-  id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-  filename: "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-  url: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-  bytes: 1_117_320_800,
-  sha256: "1741e5b2d062b07acf048bf0d2c514dadf2a48f94e2b4aa0cfe069af3838ee2f",
+// Qwen2.5-Coder-3B-Instruct ships under the Qwen Research License Agreement,
+// which permits non-commercial use only. It stays an optional catalog entry so
+// the default SemIf configuration never depends on restricted weights. See
+// packages/desktop/src-tauri/resources/THIRD_PARTY_NOTICES.md.
+const QWEN2_5_CODER_3B: Entry = {
+  id: "Qwen/Qwen2.5-Coder-3B-Instruct",
+  filename: "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+  url: "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+  bytes: 2_104_932_800,
+  sha256: "724fb256bec1ff062b2f65e4569e871ad2e95ab2a3989723d1769c54294730b7",
   quant: "Q4_K_M",
-  label: "DeepSeek-R1-Distill-Qwen-1.5B",
-  source: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-  family: "deepseek_r1",
+  label: "Qwen2.5-Coder-3B-Instruct",
+  source: "Qwen/Qwen2.5-Coder-3B-Instruct",
+  family: "qwen",
   choice: true,
-  aliases: ["bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF", "DeepSeek-R1-Distill-Qwen-1.5B"],
+  aliases: ["Qwen/Qwen2.5-Coder-3B-Instruct-GGUF", "Qwen2.5-Coder-3B-Instruct"],
 }
 
 const QWEN_2_5_1_5B: Entry = {
@@ -88,7 +92,7 @@ const QWEN_2_5_1_5B: Entry = {
 
 export const MODEL: Entry = LFM2_1_2B
 
-export const MODELS: readonly Entry[] = [LFM2_1_2B, DEEPSEEK_R1_1_5B, QWEN_2_5_1_5B, LFM2_350M]
+export const MODELS: readonly Entry[] = [LFM2_1_2B, QWEN2_5_CODER_3B, QWEN_2_5_1_5B, LFM2_350M]
 
 export const CHOICES: readonly Entry[] = MODELS.filter((entry) => entry.choice)
 
