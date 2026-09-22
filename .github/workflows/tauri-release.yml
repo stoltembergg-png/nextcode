@@ -217,6 +217,7 @@ jobs:
             case "$VERSION" in *beta*) CHANNEL="beta";; *) CHANNEL="prod";; esac
           else
             VERSION="${INPUT_VERSION:-0.0.0}"
+            VERSION="${VERSION#v}"
             TAG="v${VERSION}"
             case "$VERSION" in *beta*) CHANNEL="beta";; *) CHANNEL="${INPUT_CHANNEL:-prod}";; esac
           fi
@@ -529,8 +530,10 @@ jobs:
             TAG="$GITHUB_REF_NAME"
             case "$TAG" in *beta*) CHANNEL="beta";; *) CHANNEL="prod";; esac
           else
-            TAG="v${INPUT_VERSION:-0.0.0}"
-            case "$INPUT_VERSION" in *beta*) CHANNEL="beta";; *) CHANNEL="prod";; esac
+            VERSION="${INPUT_VERSION:-0.0.0}"
+            VERSION="${VERSION#v}"
+            TAG="v${VERSION}"
+            case "$VERSION" in *beta*) CHANNEL="beta";; *) CHANNEL="prod";; esac
           fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "CHANNEL=$CHANNEL" >> "$GITHUB_ENV"
