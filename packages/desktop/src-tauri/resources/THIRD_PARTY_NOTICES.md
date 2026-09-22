@@ -83,7 +83,11 @@ END OF TERMS AND CONDITIONS
 Optional SemIf catalog weights. Licensed under Apache License 2.0.
 Source: <https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/raw/main/LICENSE>.
 
-## DeepSeek-R1-Distill-Qwen-1.5B (`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`)
+## Qwen2.5-Coder-3B-Instruct (`Qwen/Qwen2.5-Coder-3B-Instruct`)
 
-Optional SemIf catalog weights, served from the bartowski Q4_K_M GGUF conversion. The distill is derived from Qwen2.5 (Apache License 2.0).
-Sources: <https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B> and <https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF>.
+Optional SemIf catalog weights, served from the official Q4_K_M GGUF conversion.
+
+**License: Qwen Research License Agreement — non-commercial use only.** Commercial
+use of these weights requires a separate license from Alibaba Cloud. This entry is
+optional and is never selected by the default SemIf configuration.
+Source: <https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/raw/main/LICENSE>.

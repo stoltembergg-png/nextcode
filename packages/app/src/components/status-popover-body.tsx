@@ -60,7 +60,7 @@ const SEMIF_DEFAULT_MODEL = "LiquidAI/LFM2-1.2B-GGUF"
 
 const SEMIF_MODEL_CHOICES = [
   { id: SEMIF_DEFAULT_MODEL, label: "LFM2-1.2B Q4_K_M" },
-  { id: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", label: "DeepSeek-R1-Distill-Qwen-1.5B" },
+  { id: "Qwen/Qwen2.5-Coder-3B-Instruct", label: "Qwen2.5-Coder-3B-Instruct" },
   { id: "Qwen/Qwen2.5-1.5B", label: "Qwen2.5-1.5B" },
 ] as const
 
